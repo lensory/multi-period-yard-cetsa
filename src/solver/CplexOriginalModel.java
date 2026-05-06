@@ -4,14 +4,16 @@ package solver;
 import entity.*;
 import ilog.concert.*;
 import ilog.cplex.IloCplex;
-import main.InstanceGenerator;
 import util.MyMathMethods;
 
+import java.io.File;
 import java.util.*;
 
 public class CplexOriginalModel {
     public final Instance instance;
     public IloCplex cplex;
+    private final boolean nameCplexObjects;
+    private final String lpExportFileName;
 
     private final double PRECISION = 1e-6;
     private final int M = 1000000;
@@ -31,22 +33,77 @@ public class CplexOriginalModel {
     private HashMap<VesselPeriod, IloIntVar> varEpsilonU, varSigmaU, varEpsilonL, varSigmaL, varIota, varKappa;
     private HashMap<Subblock, IloIntVar[]> varRho;
 
-    private IloIntVar varUnloadOverload;
-    private IloIntVar varLoadOverload;
+    public IloIntVar varUnloadOverload;
+    public IloIntVar varLoadOverload;
 
     public IloLinearNumExpr objRoute;
     public IloLinearNumExpr objTime;
     public IloLinearNumExpr objCongestion;
 
     private CplexOriginalModel(Instance instance, IloCplex cplex) throws IloException {
+        this(instance, cplex, false, null);
+    }
+
+    private CplexOriginalModel(Instance instance, IloCplex cplex, boolean nameCplexObjects, String lpExportFileName) throws IloException {
         this.instance = instance;
         this.horizon = instance.horizon;
         this.roads = instance.roads;
 
         this.cplex = cplex;
+        this.nameCplexObjects = nameCplexObjects;
+        this.lpExportFileName = lpExportFileName;
 
 //        buildOriginalModel();
 //        buildConciseModel();
+    }
+
+    private IloIntVar boolVar(String format, Object... args) throws IloException {
+        return nameCplexObjects ? cplex.boolVar(String.format(format, args)) : cplex.boolVar();
+    }
+
+    private IloIntVar intVar(int lb, int ub, String format, Object... args) throws IloException {
+        return nameCplexObjects ? cplex.intVar(lb, ub, String.format(format, args)) : cplex.intVar(lb, ub);
+    }
+
+    private void addLe(IloNumExpr lhs, double rhs, String format, Object... args) throws IloException {
+        if (nameCplexObjects)
+            cplex.addLe(lhs, rhs, String.format(format, args));
+        else
+            cplex.addLe(lhs, rhs);
+    }
+
+    private void addLe(IloNumExpr lhs, IloNumExpr rhs, String format, Object... args) throws IloException {
+        if (nameCplexObjects)
+            cplex.addLe(lhs, rhs, String.format(format, args));
+        else
+            cplex.addLe(lhs, rhs);
+    }
+
+    private void addEq(IloNumExpr lhs, double rhs, String format, Object... args) throws IloException {
+        if (nameCplexObjects)
+            cplex.addEq(lhs, rhs, String.format(format, args));
+        else
+            cplex.addEq(lhs, rhs);
+    }
+
+    private void addEq(IloNumExpr lhs, IloNumExpr rhs, String format, Object... args) throws IloException {
+        if (nameCplexObjects)
+            cplex.addEq(lhs, rhs, String.format(format, args));
+        else
+            cplex.addEq(lhs, rhs);
+    }
+
+    private void addGe(IloNumExpr lhs, IloNumExpr rhs, String format, Object... args) throws IloException {
+        if (nameCplexObjects)
+            cplex.addGe(lhs, rhs, String.format(format, args));
+        else
+            cplex.addGe(lhs, rhs);
+    }
+
+    public void exportModelIfRequested() throws IloException {
+        if (lpExportFileName != null) {
+            cplex.exportModel(lpExportFileName);
+        }
     }
 
     public static CplexOriginalModel buildOriginalIntegratedModel(Instance instance, IloCplex cplex) throws IloException {
@@ -81,7 +138,11 @@ public class CplexOriginalModel {
     }
 
     public static CplexOriginalModel buildCompactIntegratedModel(Instance instance, IloCplex cplex) throws IloException {
-        CplexOriginalModel model = new CplexOriginalModel(instance, cplex);
+        return buildCompactIntegratedModel(instance, cplex, null);
+    }
+
+    public static CplexOriginalModel buildCompactIntegratedModel(Instance instance, IloCplex cplex, String lpExportFileName) throws IloException {
+        CplexOriginalModel model = new CplexOriginalModel(instance, cplex, lpExportFileName != null, lpExportFileName);
 
         model.initVarX();
         model.initVarY();
@@ -139,7 +200,7 @@ public class CplexOriginalModel {
             for (Subblock k : instance.getSubblocks()) {
                 IloIntVar[] __varX = new IloIntVar[horizon];
                 for (int t = 0; t < horizon; t++) {
-                    __varX[t] = cplex.boolVar(String.format("X_%d_%d_%d", vessel.getVid(), k.getId(), t));
+                    __varX[t] = boolVar("X_%d_%d_%d", vessel.getVid(), k.getId(), t);
                 }
                 _varX.put(k, __varX);
             }
@@ -152,7 +213,7 @@ public class CplexOriginalModel {
         for (VesselPeriod vesselPeriod : instance.getVesselPeriods()) {
             HashMap<Subblock, IloIntVar> _varY = new HashMap<>(instance.getNumSubblocks());
             for (Subblock k : instance.getSubblocks()) {
-                _varY.put(k, cplex.boolVar(String.format("Y_%d_%d_%d", vesselPeriod.getVid(), vesselPeriod.getPid(), k.getId())));
+                _varY.put(k, boolVar("Y_%d_%d_%d", vesselPeriod.getVid(), vesselPeriod.getPid(), k.getId()));
             }
             varY.put(vesselPeriod, _varY);
         }
@@ -165,8 +226,8 @@ public class CplexOriginalModel {
             for (VesselPeriod that : instance.getDestinationVesselPeriodsOf(vesselPeriod)) {
                 HashMap<Subblock, IloIntVar> __varZ = new HashMap<>();
                 for (Subblock k : instance.getSubblocks()) {
-                    __varZ.put(k, cplex.boolVar(String.format("Z_%d_%d_%d_%d_%d",
-                            vesselPeriod.getVid(), vesselPeriod.getPid(), k.getId(), that.getVid(), that.getPid())));
+                    __varZ.put(k, boolVar("Z_%d_%d_%d_%d_%d",
+                            vesselPeriod.getVid(), vesselPeriod.getPid(), k.getId(), that.getVid(), that.getPid()));
                 }
                 _varZ.put(that, __varZ);
             }
@@ -181,8 +242,8 @@ public class CplexOriginalModel {
             for (VesselPeriod that : instance.getDestinationVesselPeriodsOf(vesselPeriod)) {
                 HashMap<Subblock, IloIntVar> __varW = new HashMap<>();
                 for (Subblock k : instance.getSubblocks()) {
-                    __varW.put(k, cplex.intVar(0, instance.spaceCapacity, String.format("W_%d_%d_%d_%d_%d",
-                            vesselPeriod.getVid(), vesselPeriod.getPid(), k.getId(), that.getVid(), that.getPid())));
+                    __varW.put(k, intVar(0, instance.spaceCapacity, "W_%d_%d_%d_%d_%d",
+                            vesselPeriod.getVid(), vesselPeriod.getPid(), k.getId(), that.getVid(), that.getPid()));
                 }
                 _varW.put(that, __varW);
             }
@@ -200,7 +261,7 @@ public class CplexOriginalModel {
                 for (Subblock k : instance.getSubblocks()) {
                     IloIntVar[] ___varDeltaU = new IloIntVar[horizon];
                     for (int t = 0; t < horizon; t++) {
-                        ___varDeltaU[t] = cplex.boolVar(String.format("DeltaU_%d_%d_%d_%d", vessel.getVid(), that.getVid(), k.getId(), t));
+                        ___varDeltaU[t] = boolVar("DeltaU_%d_%d_%d_%d", vessel.getVid(), that.getVid(), k.getId(), t);
                     }
                     __varDeltaU.put(k, ___varDeltaU);
                 }
@@ -217,7 +278,7 @@ public class CplexOriginalModel {
             for (Subblock k : instance.getSubblocks()) {
                 IloIntVar[] __varDeltaL = new IloIntVar[horizon];
                 for (int t = 0; t < horizon; t++) {
-                    __varDeltaL[t] = cplex.boolVar(String.format("DeltaL_%d_%d_%d", vessel.getVid(), k.getId(), t));
+                    __varDeltaL[t] = boolVar("DeltaL_%d_%d_%d", vessel.getVid(), k.getId(), t);
                 }
                 _varDeltaL.put(k, __varDeltaL);
             }
@@ -234,12 +295,12 @@ public class CplexOriginalModel {
         varKappa = new HashMap<>();
         for (Vessel v : instance.getVessels())
             for (VesselPeriod ip : v.getPeriods()) {
-                varEpsilonU.put(ip, cplex.intVar(ip.getRelativeFeasibleIntervalStart(), ip.getRelativeFeasibleIntervalEnd() - 1, String.format("EpsilonU_%d_%d", ip.getVid(), ip.getPid())));
-                varEpsilonL.put(ip, cplex.intVar(ip.getRelativeFeasibleIntervalStart(), ip.getRelativeFeasibleIntervalEnd() - 1, String.format("EpsilonL_%d_%d", ip.getVid(), ip.getPid())));
-                varSigmaU.put(ip, cplex.intVar(ip.getRelativeFeasibleIntervalStart(), ip.getRelativeFeasibleIntervalEnd(), String.format("SigmaU_%d_%d", ip.getVid(), ip.getPid())));
-                varSigmaL.put(ip, cplex.intVar(ip.getRelativeFeasibleIntervalStart(), ip.getRelativeFeasibleIntervalEnd(), String.format("SigmaL_%d_%d", ip.getVid(), ip.getPid())));
-                varIota.put(ip, cplex.intVar(0, ip.getRelativeExpectedIntervalStart() - ip.getRelativeFeasibleIntervalStart(), String.format("Iota_%d_%d", ip.getVid(), ip.getPid())));
-                varKappa.put(ip, cplex.intVar(0, ip.getRelativeFeasibleIntervalEnd() - ip.getRelativeExpectedIntervalStart(), String.format("Kappa_%d_%d", ip.getVid(), ip.getPid())));
+                varEpsilonU.put(ip, intVar(ip.getRelativeFeasibleIntervalStart(), ip.getRelativeFeasibleIntervalEnd() - 1, "EpsilonU_%d_%d", ip.getVid(), ip.getPid()));
+                varEpsilonL.put(ip, intVar(ip.getRelativeFeasibleIntervalStart(), ip.getRelativeFeasibleIntervalEnd() - 1, "EpsilonL_%d_%d", ip.getVid(), ip.getPid()));
+                varSigmaU.put(ip, intVar(ip.getRelativeFeasibleIntervalStart(), ip.getRelativeFeasibleIntervalEnd(), "SigmaU_%d_%d", ip.getVid(), ip.getPid()));
+                varSigmaL.put(ip, intVar(ip.getRelativeFeasibleIntervalStart(), ip.getRelativeFeasibleIntervalEnd(), "SigmaL_%d_%d", ip.getVid(), ip.getPid()));
+                varIota.put(ip, intVar(0, ip.getRelativeExpectedIntervalStart() - ip.getRelativeFeasibleIntervalStart(), "Iota_%d_%d", ip.getVid(), ip.getPid()));
+                varKappa.put(ip, intVar(0, ip.getRelativeFeasibleIntervalEnd() - ip.getRelativeExpectedIntervalStart(), "Kappa_%d_%d", ip.getVid(), ip.getPid()));
             }
     }
 
@@ -248,7 +309,7 @@ public class CplexOriginalModel {
         for (Subblock k : instance.getSubblocks()) {
             IloIntVar[] _varRho = new IloIntVar[horizon];
             for (int t = 0; t < horizon; t++) {
-                _varRho[t] = cplex.boolVar(String.format("Rho_%d_%d", k.getId(), t));
+                _varRho[t] = boolVar("Rho_%d_%d", k.getId(), t);
             }
             varRho.put(k, _varRho);
         }
@@ -263,9 +324,9 @@ public class CplexOriginalModel {
             IloIntVar[] _varPiL = new IloIntVar[instance.horizon];
             IloIntVar[] _varPiUD = new IloIntVar[instance.horizon];
             for (int t = 0; t < horizon; t++) {
-                _varPiU[t] = cplex.boolVar(String.format("PiU_%d_%d", v.getVid(), t));
-                _varPiL[t] = cplex.boolVar(String.format("PiL_%d_%d", v.getVid(), t));
-                _varPiUD[t] = cplex.boolVar(String.format("PiUD_%d_%d", v.getVid(), t));
+                _varPiU[t] = boolVar("PiU_%d_%d", v.getVid(), t);
+                _varPiL[t] = boolVar("PiL_%d_%d", v.getVid(), t);
+                _varPiUD[t] = boolVar("PiUD_%d_%d", v.getVid(), t);
             }
             varPiU.put(v, _varPiU);
             varPiL.put(v, _varPiL);
@@ -274,8 +335,8 @@ public class CplexOriginalModel {
     }
 
     private void initVarRoadFlow() throws IloException {
-        varLoadOverload = cplex.intVar(0, Integer.MAX_VALUE, "largestLoadFlow");
-        varUnloadOverload = cplex.intVar(0, Integer.MAX_VALUE, "largestUnloadFlow");
+        varLoadOverload = intVar(0, Integer.MAX_VALUE, "largestLoadFlow");
+        varUnloadOverload = intVar(0, Integer.MAX_VALUE, "largestUnloadFlow");
 
 //        loadFlows = new IloIntVar[roads][horizon];
 //        unloadFlows = new IloIntVar[roads][horizon];
@@ -297,7 +358,7 @@ public class CplexOriginalModel {
                 IloLinearIntExpr expr = cplex.linearIntExpr();
                 for (Vessel v : instance.getVessels())
                     expr.addTerm(1, varX.get(v).get(k)[t]);
-                cplex.addLe(expr, 1, String.format("ConsYardX%d,%d", k.getId(), t));
+                addLe(expr, 1, "ConsYardX%d,%d", k.getId(), t);
             }
 
 
@@ -305,8 +366,8 @@ public class CplexOriginalModel {
             IloLinearIntExpr expr = cplex.linearIntExpr();
             for (Subblock k : instance.getSubblocks())
                 expr.addTerm(1, varY.get(vp).get(k));
-            cplex.addLe(expr, MyMathMethods.ceilDiv(vp.totalLoadContainers, instance.spaceCapacity),
-                    String.format("ConsYardMax%d,%d", vp.getVid(), vp.getPid()));
+            addLe(expr, MyMathMethods.ceilDiv(vp.totalLoadContainers, instance.spaceCapacity),
+                    "ConsYardMax%d,%d", vp.getVid(), vp.getPid());
         }
 
         for (VesselPeriod vp : instance.getVesselPeriods())
@@ -323,13 +384,15 @@ public class CplexOriginalModel {
                     }
                 });
                 expr.addTerm(-1 * (vp.getPeriodInterval().getLength()), varY.get(vp).get(k));
-                cplex.addEq(expr, 0, String.format("ConsYardY%d,%d,%d", vp.getVid(), vp.getPid(), k.getId()));
+                addEq(expr, 0, "ConsYardY%d,%d,%d", vp.getVid(), vp.getPid(), k.getId());
             }
 
         for (VesselPeriod ip : instance.getVesselPeriods())
             for (Subblock k : instance.getSubblocks()) {
                 for (VesselPeriod jq : instance.getSourceVesselPeriodsOf(ip))
-                    cplex.addLe(varZ.get(jq).get(ip).get(k), varY.get(ip).get(k));
+                    addLe(varZ.get(jq).get(ip).get(k), varY.get(ip).get(k),
+                            "ConsYardZY%d,%d,%d,%d,%d",
+                            jq.getVid(), jq.getPid(), ip.getVid(), ip.getPid(), k.getId());
             }
     }
 
@@ -339,18 +402,18 @@ public class CplexOriginalModel {
         for (VesselPeriod ip : instance.getVesselPeriods())
             for (VesselPeriod jq : instance.getSourceVesselPeriodsOf(ip))
                 for (Subblock k : instance.getSubblocks())
-                    cplex.addLe(varW.get(jq).get(ip).get(k),
+                    addLe(varW.get(jq).get(ip).get(k),
                             cplex.prod(instance.spaceCapacity, varZ.get(jq).get(ip).get(k)),
-                            String.format("ConsFlowWZ%d,%d,%d,%d,%d", ip.getVid(), ip.getPid(), k.getId(), jq.getVid(), jq.getPid()));
+                            "ConsFlowWZ%d,%d,%d,%d,%d", ip.getVid(), ip.getPid(), k.getId(), jq.getVid(), jq.getPid());
 
         for (VesselPeriod ip : instance.getVesselPeriods())
             for (VesselPeriod jq : instance.getSourceVesselPeriodsOf(ip)) {
                 IloLinearIntExpr expr = cplex.linearIntExpr();
                 for (Subblock k : instance.getSubblocks())
                     expr.addTerm(1, varW.get(jq).get(ip).get(k));
-                cplex.addEq(expr, instance.getTransshipmentTo(jq, ip),
-                        String.format("ConsFlowN%d,%d,%d,%d", ip.getVid(), ip.getPid(),
-                                jq.getVid(), jq.getPid()));
+                addEq(expr, instance.getTransshipmentTo(jq, ip),
+                        "ConsFlowN%d,%d,%d,%d", ip.getVid(), ip.getPid(),
+                        jq.getVid(), jq.getPid());
             }
 
         for (VesselPeriod ip : instance.getVesselPeriods())
@@ -358,8 +421,8 @@ public class CplexOriginalModel {
                 IloLinearIntExpr expr = cplex.linearIntExpr();
                 for (VesselPeriod jq : instance.getSourceVesselPeriodsOf(ip))
                     expr.addTerm(1, varW.get(jq).get(ip).get(k));
-                cplex.addLe(expr, instance.spaceCapacity,
-                        String.format("ConsFlowC%d,%d,%d", ip.getVid(), ip.getPid(), k.getId()));
+                addLe(expr, instance.spaceCapacity,
+                        "ConsFlowC%d,%d,%d", ip.getVid(), ip.getPid(), k.getId());
             }
     }
 
@@ -396,9 +459,9 @@ public class CplexOriginalModel {
 //                            if (tjq >= jq.getFirstPeriodTimeStep() && tjq <= jq.getLastPeriodTimeStep())
 //                                expr.addTerm(1, varDeltaU.get(instance.getVesselOf(jq)).get(i).get(k)[t]);
 //                        }
-                        cplex.addEq(expr, varZ.get(jq).get(ip).get(k),
-                                String.format("ConsHandleZ%d,%d,%d,%d,%d",
-                                        i.getVid(), ip.getPid(), k.getId(), jq.getVid(), jq.getPid()));
+                        addEq(expr, varZ.get(jq).get(ip).get(k),
+                                "ConsHandleZ%d,%d,%d,%d,%d",
+                                i.getVid(), ip.getPid(), k.getId(), jq.getVid(), jq.getPid());
                     }
         for (VesselPeriod ip : instance.getVesselPeriods())
             for (Subblock k : instance.getSubblocks()) {
@@ -413,9 +476,9 @@ public class CplexOriginalModel {
 //                for (int tip = ip.getFirstPeriodTimeStep(); tip <= ip.getLastPeriodTimeStep(); tip++) {
 //                    expr.addTerm(1, varDeltaL.get(ip.vessel).get(k)[getOriginalTimeStep(ip.vessel, tip)]);
 //                }
-                cplex.addEq(expr, varY.get(ip).get(k),
-                        String.format("ConsHandleY%d,%d,%d",
-                                ip.getVid(), ip.getPid(), k.getId()));
+                addEq(expr, varY.get(ip).get(k),
+                        "ConsHandleY%d,%d,%d",
+                        ip.getVid(), ip.getPid(), k.getId());
             }
 
 
@@ -430,14 +493,14 @@ public class CplexOriginalModel {
                                     IloIntExpr bigM = cplex.prod(jq.getLengthOfPeriod(),
                                             cplex.diff(1, varDeltaU.get(j).get(i).get(k)[t]));
 
-                                    cplex.addLe(varEpsilonU.get(jq),
+                                    addLe(varEpsilonU.get(jq),
                                             cplex.sum(tjq, bigM),
-                                            String.format("ConsHandleEpsilonU%d,%d,%d,%d,%d",
-                                                    jq.getVid(), jq.getPid(), tjq, i.getVid(), k.getId()));
-                                    cplex.addGe(varSigmaU.get(jq),
+                                            "ConsHandleEpsilonU%d,%d,%d,%d,%d",
+                                            jq.getVid(), jq.getPid(), tjq, i.getVid(), k.getId());
+                                    addGe(varSigmaU.get(jq),
                                             cplex.diff(tjq + 1, bigM),
-                                            String.format("ConsHandleSigmaU%d,%d,%d,%d,%d",
-                                                    jq.getVid(), jq.getPid(), tjq, i.getVid(), k.getId()));
+                                            "ConsHandleSigmaU%d,%d,%d,%d,%d",
+                                            jq.getVid(), jq.getPid(), tjq, i.getVid(), k.getId());
                                 }
                         } catch (IloException e) {
                             throw new RuntimeException(e);
@@ -468,14 +531,14 @@ public class CplexOriginalModel {
                             int tip = ip.getPeriodInterval().shiftsFromStart(t, instance.horizon);
                             IloIntExpr bigM = cplex.prod(ip.getLengthOfPeriod(),
                                     cplex.diff(1, varDeltaL.get(i).get(k)[t]));
-                            cplex.addLe(varEpsilonL.get(ip),
+                            addLe(varEpsilonL.get(ip),
                                     cplex.sum(tip, bigM),
-                                    String.format("ConsHandleEpsilonL%d,%d,%d,%d",
-                                            ip.getVid(), ip.getPid(), tip, k.getId()));
-                            cplex.addGe(varSigmaL.get(ip),
+                                    "ConsHandleEpsilonL%d,%d,%d,%d",
+                                    ip.getVid(), ip.getPid(), tip, k.getId());
+                            addGe(varSigmaL.get(ip),
                                     cplex.diff(tip + 1, bigM),
-                                    String.format("ConsHandleSigmaL%d,%d,%d,%d",
-                                            ip.getVid(), ip.getPid(), tip, k.getId()));
+                                    "ConsHandleSigmaL%d,%d,%d,%d",
+                                    ip.getVid(), ip.getPid(), tip, k.getId());
                         } catch (IloException e) {
                             throw new RuntimeException(e);
                         }
@@ -504,10 +567,10 @@ public class CplexOriginalModel {
                                 for (Subblock k : instance.getSubblocks()) {
                                     IloIntExpr bigM = cplex.prod(ip.getLengthOfPeriod(),
                                             cplex.diff(1, varDeltaU.get(j).get(i).get(k)[t]));
-                                    cplex.addGe(varEpsilonL.get(ip),
+                                    addGe(varEpsilonL.get(ip),
                                             cplex.diff(tip + 1, bigM),
-                                            String.format("ConsHandleTrans%d,%d,%d,%d,%d",
-                                                    ip.getVid(), ip.getPid(), tip, j.getVid(), k.getId()));
+                                            "ConsHandleTrans%d,%d,%d,%d,%d",
+                                            ip.getVid(), ip.getPid(), tip, j.getVid(), k.getId());
                                 }
                     } catch (IloException e) {
                         throw new RuntimeException(e);
@@ -529,11 +592,16 @@ public class CplexOriginalModel {
 
         for (Vessel i : instance.getVessels())
             for (VesselPeriod ip : i.getPeriods()) {
-                cplex.addLe(varEpsilonU.get(ip), varSigmaU.get(ip));
-                cplex.addLe(varSigmaU.get(ip), varEpsilonL.get(ip));
-                cplex.addLe(varEpsilonL.get(ip), varSigmaL.get(ip));
-                cplex.addGe(varIota.get(ip), cplex.diff(ip.getRelativeExpectedIntervalStart(), varEpsilonU.get(ip)));
-                cplex.addGe(varKappa.get(ip), cplex.diff(varSigmaL.get(ip), ip.getRelativeExpectedIntervalEnd()));
+                addLe(varEpsilonU.get(ip), varSigmaU.get(ip),
+                        "ConsHandleOrderEU_SU%d,%d", ip.getVid(), ip.getPid());
+                addLe(varSigmaU.get(ip), varEpsilonL.get(ip),
+                        "ConsHandleOrderSU_EL%d,%d", ip.getVid(), ip.getPid());
+                addLe(varEpsilonL.get(ip), varSigmaL.get(ip),
+                        "ConsHandleOrderEL_SL%d,%d", ip.getVid(), ip.getPid());
+                addGe(varIota.get(ip), cplex.diff(ip.getRelativeExpectedIntervalStart(), varEpsilonU.get(ip)),
+                        "ConsHandleIotaBase%d,%d", ip.getVid(), ip.getPid());
+                addGe(varKappa.get(ip), cplex.diff(varSigmaL.get(ip), ip.getRelativeExpectedIntervalEnd()),
+                        "ConsHandleKappaBase%d,%d", ip.getVid(), ip.getPid());
             }
 
     }
@@ -551,9 +619,9 @@ public class CplexOriginalModel {
                             throw new RuntimeException(e);
                         }
                     });
-                    cplex.addEq(expr, varZ.get(jq).get(ip).get(k),
-                            String.format("ConsHandleZ%d,%d,%d,%d,%d",
-                                    ip.getVid(), ip.getPid(), k.getId(), jq.getVid(), jq.getPid()));
+                    addEq(expr, varZ.get(jq).get(ip).get(k),
+                            "ConsHandleZ%d,%d,%d,%d,%d",
+                            ip.getVid(), ip.getPid(), k.getId(), jq.getVid(), jq.getPid());
                 }
         for (VesselPeriod ip : instance.getVesselPeriods())
             for (Subblock k : instance.getSubblocks()) {
@@ -565,9 +633,9 @@ public class CplexOriginalModel {
                         throw new RuntimeException(e);
                     }
                 });
-                cplex.addEq(expr, varY.get(ip).get(k),
-                        String.format("ConsHandleY%d,%d,%d",
-                                ip.getVid(), ip.getPid(), k.getId()));
+                addEq(expr, varY.get(ip).get(k),
+                        "ConsHandleY%d,%d,%d",
+                        ip.getVid(), ip.getPid(), k.getId());
             }
 
         for (Vessel j : instance.getVessels()) {
@@ -578,8 +646,8 @@ public class CplexOriginalModel {
                     if (!i.equals(j))
                         for (Subblock k : instance.getSubblocks()) {
                             IloIntVar rhs = _varDeltaU.get(i).get(k)[t];
-                            cplex.addGe(lhs, rhs, String.format("ConsHandlePiU%d,%d,%d,%d",
-                                    j.getVid(), i.getVid(), k.getId(), t));
+                            addGe(lhs, rhs, "ConsHandlePiU%d,%d,%d,%d",
+                                    j.getVid(), i.getVid(), k.getId(), t);
                         }
             }
         }
@@ -590,8 +658,8 @@ public class CplexOriginalModel {
                 IloIntVar lhs = varPiL.get(i)[t];
                 for (Subblock k : instance.getSubblocks()) {
                     IloIntVar rhs = _varDeltaL.get(k)[t];
-                    cplex.addGe(lhs, rhs, String.format("ConsHandlePiL%d,%d,%d",
-                            i.getVid(), k.getId(), t));
+                    addGe(lhs, rhs, "ConsHandlePiL%d,%d,%d",
+                            i.getVid(), k.getId(), t);
                 }
             }
         }
@@ -603,8 +671,8 @@ public class CplexOriginalModel {
                     if (!i.equals(j))
                         for (Subblock k : instance.getSubblocks()) {
                             IloIntVar rhs = varDeltaU.get(j).get(i).get(k)[t];
-                            cplex.addGe(lhs, rhs, String.format("ConsHandlePiUD%d,%d,%d,%d",
-                                    j.getVid(), i.getVid(), k.getId(), t));
+                            addGe(lhs, rhs, "ConsHandlePiUD%d,%d,%d,%d",
+                                    j.getVid(), i.getVid(), k.getId(), t);
                         }
             }
         }
@@ -618,11 +686,11 @@ public class CplexOriginalModel {
                 int t = it.next();
                 // t \notin [a, b)
                 if (relativeTimeStep < a || relativeTimeStep >= b)
-                    cplex.addLe(cplex.sum(varPiU.get(instance.getVesselOf(ip))[t], varPiL.get(instance.getVesselOf(ip))[t]), 0,
-                            String.format("ConsHandlePiUL%d,%d,%d", ip.getVid(), ip.getPid(), t));
+                    addLe(cplex.sum(varPiU.get(instance.getVesselOf(ip))[t], varPiL.get(instance.getVesselOf(ip))[t]), 0,
+                            "ConsHandlePiUL%d,%d,%d", ip.getVid(), ip.getPid(), t);
                 else
-                    cplex.addLe(cplex.sum(varPiU.get(instance.getVesselOf(ip))[t], varPiL.get(instance.getVesselOf(ip))[t]), 1,
-                            String.format("ConsHandlePiUL%d,%d,%d", ip.getVid(), ip.getPid(), t));
+                    addLe(cplex.sum(varPiU.get(instance.getVesselOf(ip))[t], varPiL.get(instance.getVesselOf(ip))[t]), 1,
+                            "ConsHandlePiUL%d,%d,%d", ip.getVid(), ip.getPid(), t);
                 relativeTimeStep++;
             }
         }
@@ -641,10 +709,10 @@ public class CplexOriginalModel {
                 });
 
 
-                cplex.addLe(expr,
+                addLe(expr,
                         cplex.prod(2 * (ip.getLengthOfPeriod() - relativeTimeStep),
                                 cplex.diff(1, varPiL.get(instance.getVesselOf(ip))[t])),
-                        String.format("ConsHandlePiUUD%d,%d,%d", ip.getVid(), ip.getPid(), t));
+                        "ConsHandlePiUUD%d,%d,%d", ip.getVid(), ip.getPid(), t);
                 relativeTimeStep++;
             }
         }
@@ -659,14 +727,14 @@ public class CplexOriginalModel {
                 IloIntExpr bigM = cplex.prod(ip.getLengthOfPeriod(),
                         cplex.diff(1, cplex.sum(varPiU.get(instance.getVesselOf(ip))[t], varPiL.get(instance.getVesselOf(ip))[t]))
                 );
-                cplex.addGe(varIota.get(ip),
+                addGe(varIota.get(ip),
                         cplex.diff(expA - relativeTimeStep, bigM),
-                        String.format("ConsHandleIota%d,%d,%d",
-                                ip.getVid(), ip.getPid(), t));
-                cplex.addGe(varKappa.get(ip),
+                        "ConsHandleIota%d,%d,%d",
+                        ip.getVid(), ip.getPid(), t);
+                addGe(varKappa.get(ip),
                         cplex.diff(relativeTimeStep + 1 - expB, bigM),
-                        String.format("ConsHandleKappa%d,%d,%d",
-                                ip.getVid(), ip.getPid(), t));
+                        "ConsHandleKappa%d,%d,%d",
+                        ip.getVid(), ip.getPid(), t);
                 relativeTimeStep++;
             }
         }
@@ -684,8 +752,8 @@ public class CplexOriginalModel {
                     for (Vessel i : instance.getVessels())
                         if (i != j)
                             expr.addTerm(1, varDeltaU.get(j).get(i).get(k)[t]);
-                    cplex.addLe(expr, varRho.get(k)[t], String.format("ConsCongU%d,%d,%d",
-                            j.getVid(), k.getId(), t));
+                    addLe(expr, varRho.get(k)[t], "ConsCongU%d,%d,%d",
+                            j.getVid(), k.getId(), t);
                 }
 
         for (int t = 0; t < horizon; t++)
@@ -693,16 +761,16 @@ public class CplexOriginalModel {
                 IloLinearIntExpr expr = cplex.linearIntExpr();
                 for (Vessel i : instance.getVessels())
                     expr.addTerm(1, varDeltaL.get(i).get(k)[t]);
-                cplex.addLe(expr, varRho.get(k)[t], String.format("ConsCongL%d,%d",
-                        k.getId(), t));
+                addLe(expr, varRho.get(k)[t], "ConsCongL%d,%d",
+                        k.getId(), t);
             }
 
         for (Subblock k1 : instance.getSubblocks())
             for (Subblock k2 : instance.getSubblocks())
                 if ((!k1.equals(k2)) && (k1.isNeighborInSameBlock(k2) || k1.isNeighborAcrossLane(k2)))
                     for (int t = 0; t < horizon; t++) {
-                        cplex.addLe(cplex.sum(varRho.get(k1)[t], varRho.get(k2)[t]), 1,
-                                String.format("ConsCongRho%d,%d,%d", k1.getId(), k2.getId(), t));
+                        addLe(cplex.sum(varRho.get(k1)[t], varRho.get(k2)[t]), 1,
+                                "ConsCongRho%d,%d,%d", k1.getId(), k2.getId(), t);
                     }
 
 
@@ -735,8 +803,8 @@ public class CplexOriginalModel {
                 }
         for (int l = 0; l < roads; l++)
             for (int t = 0; t < horizon; t++) {
-                cplex.addLe(exprU[l][t], cplex.sum(instance.maxUnloadFlows, varUnloadOverload),
-                        String.format("ConsCongRoadU%d,%d", l, t));
+                addLe(exprU[l][t], cplex.sum(instance.maxUnloadFlows, varUnloadOverload),
+                        "ConsCongRoadU%d,%d", l, t);
             }
 
         IloLinearIntExpr[][] exprL = new IloLinearIntExpr[roads][horizon];
@@ -762,8 +830,8 @@ public class CplexOriginalModel {
                 }
         for (int l = 0; l < roads; l++)
             for (int t = 0; t < horizon; t++) {
-                cplex.addLe(exprL[l][t], cplex.sum(instance.maxLoadFlows, varLoadOverload),
-                        String.format("ConsCongRoadL%d,%d", l, t));
+                addLe(exprL[l][t], cplex.sum(instance.maxLoadFlows, varLoadOverload),
+                        "ConsCongRoadL%d,%d", l, t);
             }
     }
 
@@ -1070,28 +1138,92 @@ public class CplexOriginalModel {
         });
     }
 
+    private static File[] listInstanceFiles() {
+        File inputDir = new File("input");
+        File[] files = inputDir.listFiles((dir, name) -> name.startsWith("instance_") && name.endsWith(".json"));
+        if (files == null)
+            throw new IllegalStateException("Cannot list instance files from " + inputDir.getAbsolutePath());
+
+        Arrays.sort(files, Comparator
+                .comparing(CplexOriginalModel::getInstanceScale)
+                .thenComparing(CplexOriginalModel::getInstanceSeed)
+                .thenComparing(File::getName));
+        return files;
+    }
+
+    private static String getInstanceScale(File file) {
+        String name = file.getName();
+        int start = "instance_".length();
+        int seedSeparator = name.lastIndexOf('_');
+        if (seedSeparator <= start)
+            return name;
+        return name.substring(start, seedSeparator);
+    }
+
+    private static String getInstanceSeed(File file) {
+        String name = file.getName();
+        int seedSeparator = name.lastIndexOf('_');
+        int extension = name.lastIndexOf('.');
+        if (seedSeparator < 0 || extension <= seedSeparator)
+            return "";
+        return name.substring(seedSeparator + 1, extension);
+    }
+
+    private static class FeasibilityStats {
+        int total;
+        int feasible;
+        int notProvenFeasible;
+        int error;
+    }
+
     public static void main(String[] args) throws IloException {
+        Double timeLimit = args.length > 0 ? Double.parseDouble(args[0]) : null;
+        Map<String, FeasibilityStats> statsByScale = new LinkedHashMap<>();
 
+        for (File file : listInstanceFiles()) {
+            String scale = getInstanceScale(file);
+            String seed = getInstanceSeed(file);
+            FeasibilityStats stats = statsByScale.computeIfAbsent(scale, key -> new FeasibilityStats());
+            stats.total++;
 
-//        Instance instance = Instance.readJson("input/instance_{06-00-03}_{06-03}_01.json");
-        Instance instance = InstanceGenerator.generate(4, 1, 1, 6, 2, 1);
-        IloCplex cplex = new IloCplex();
-        CplexOriginalModel model = CplexOriginalModel.buildCompactIntegratedModel(instance, cplex);
-//        model.varLoadOverload.setUB(0);
-//        model.varUnloadOverload.setUB(0);
+            IloCplex cplex = null;
+            try {
+                Instance instance = Instance.readJson(file.getPath());
 
-        model.solve();
-        Map<VesselPeriod, Set<Subblock>> assignment = model.getSubblockAssignment();
-        System.out.println("Assignment: ");
-        assignment.forEach((vesselPeriod, subblocks) -> {
-                    System.out.print(vesselPeriod + " -> ");
-                    subblocks.forEach(subblock ->
-                            System.out.print(subblock + "; ")
-                    );
-                    System.out.println();
+                cplex = new IloCplex();
+                if (timeLimit != null)
+                    cplex.setParam(IloCplex.IntParam.TimeLimit, timeLimit);
+                CplexOriginalModel model = CplexOriginalModel.buildCompactIntegratedModel(instance, cplex);
+                model.varLoadOverload.setUB(0);
+                model.varUnloadOverload.setUB(0);
+
+                boolean feasible = model.solve();
+                IloCplex.Status status = cplex.getStatus();
+                if (feasible) {
+                    stats.feasible++;
+                    System.out.printf("FEASIBLE scale=%s seed=%s file=%s status=%s obj=%.4f%n",
+                            scale, seed, file.getName(), status, cplex.getObjValue());
+                } else {
+                    stats.notProvenFeasible++;
+                    System.out.printf("NOT_PROVEN_FEASIBLE scale=%s seed=%s file=%s status=%s%n",
+                            scale, seed, file.getName(), status);
                 }
+            } catch (Exception e) {
+                stats.error++;
+                System.out.printf("ERROR scale=%s seed=%s file=%s message=%s%n",
+                        scale, seed, file.getName(), e.getMessage());
+            } finally {
+                if (cplex != null)
+                    cplex.end();
+            }
+        }
 
-        );
+        System.out.println();
+        System.out.println("Summary by scale:");
+        statsByScale.forEach((scale, stats) -> System.out.printf(
+                "%s total=%d feasible=%d notProvenFeasible=%d error=%d%n",
+                scale, stats.total, stats.feasible, stats.notProvenFeasible, stats.error));
+
     }
 
 }
