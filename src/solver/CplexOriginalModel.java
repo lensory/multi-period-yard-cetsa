@@ -4,12 +4,16 @@ package solver;
 import entity.*;
 import ilog.concert.*;
 import ilog.cplex.IloCplex;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import util.MyMathMethods;
 
 import java.io.File;
 import java.util.*;
 
 public class CplexOriginalModel {
+    private static final Logger LOGGER = LoggerFactory.getLogger(CplexOriginalModel.class);
+
     public final Instance instance;
     public IloCplex cplex;
     private final boolean nameCplexObjects;
@@ -40,6 +44,12 @@ public class CplexOriginalModel {
     public IloLinearNumExpr objTime;
     public IloLinearNumExpr objCongestion;
 
+    private long totalVariables;
+    private long totalConstraints;
+    private long totalObjectiveTerms;
+    private long totalObjectives;
+    private long buildStartNanos;
+
     private CplexOriginalModel(Instance instance, IloCplex cplex) throws IloException {
         this(instance, cplex, false, null);
     }
@@ -58,14 +68,17 @@ public class CplexOriginalModel {
     }
 
     private IloIntVar boolVar(String format, Object... args) throws IloException {
+        countVariable(format);
         return nameCplexObjects ? cplex.boolVar(String.format(format, args)) : cplex.boolVar();
     }
 
     private IloIntVar intVar(int lb, int ub, String format, Object... args) throws IloException {
+        countVariable(format);
         return nameCplexObjects ? cplex.intVar(lb, ub, String.format(format, args)) : cplex.intVar(lb, ub);
     }
 
     private void addLe(IloNumExpr lhs, double rhs, String format, Object... args) throws IloException {
+        countConstraint(format);
         if (nameCplexObjects)
             cplex.addLe(lhs, rhs, String.format(format, args));
         else
@@ -73,6 +86,7 @@ public class CplexOriginalModel {
     }
 
     private void addLe(IloNumExpr lhs, IloNumExpr rhs, String format, Object... args) throws IloException {
+        countConstraint(format);
         if (nameCplexObjects)
             cplex.addLe(lhs, rhs, String.format(format, args));
         else
@@ -80,6 +94,7 @@ public class CplexOriginalModel {
     }
 
     private void addEq(IloNumExpr lhs, double rhs, String format, Object... args) throws IloException {
+        countConstraint(format);
         if (nameCplexObjects)
             cplex.addEq(lhs, rhs, String.format(format, args));
         else
@@ -87,6 +102,7 @@ public class CplexOriginalModel {
     }
 
     private void addEq(IloNumExpr lhs, IloNumExpr rhs, String format, Object... args) throws IloException {
+        countConstraint(format);
         if (nameCplexObjects)
             cplex.addEq(lhs, rhs, String.format(format, args));
         else
@@ -94,10 +110,67 @@ public class CplexOriginalModel {
     }
 
     private void addGe(IloNumExpr lhs, IloNumExpr rhs, String format, Object... args) throws IloException {
+        countConstraint(format);
         if (nameCplexObjects)
             cplex.addGe(lhs, rhs, String.format(format, args));
         else
             cplex.addGe(lhs, rhs);
+    }
+
+    private void addObjectiveTerm(IloLinearNumExpr objective, double coefficient, IloIntVar var) throws IloException {
+        objective.addTerm(coefficient, var);
+        totalObjectiveTerms++;
+    }
+
+    private void addMinimize(IloNumExpr objective) throws IloException {
+        cplex.addMinimize(objective);
+        totalObjectives++;
+    }
+
+    private void countVariable(String format) {
+        totalVariables++;
+    }
+
+    private void countConstraint(String format) {
+        totalConstraints++;
+    }
+
+    private void logBuildStart(String modelName) {
+        buildStartNanos = System.nanoTime();
+        LOGGER.info("Build {} start: vessels={}, periods={}, subblocks={}, horizon={}, roads={}, namedObjects={}",
+                modelName, instance.getNumVessels(), instance.getNumVesselPeriods(),
+                instance.getNumSubblocks(), horizon, roads, nameCplexObjects);
+    }
+
+    private void runBuildStep(String stepName, BuildStep step) throws IloException {
+        long varsBefore = totalVariables;
+        long constraintsBefore = totalConstraints;
+        long objectiveTermsBefore = totalObjectiveTerms;
+        long start = System.nanoTime();
+        LOGGER.info("Build step start: {}", stepName);
+        step.run();
+        LOGGER.info("Build step done: {} elapsed={}s, vars+={}, constraints+={}, objTerms+={}",
+                stepName, secondsSince(start),
+                totalVariables - varsBefore,
+                totalConstraints - constraintsBefore,
+                totalObjectiveTerms - objectiveTermsBefore);
+    }
+
+    private void logBuildSummary(String modelName) {
+        LOGGER.info("Build {} summary: elapsed={}s, variables={}, constraints={}, objectiveTerms={}, objectives={}",
+                modelName, secondsSince(buildStartNanos),
+                totalVariables,
+                totalConstraints,
+                totalObjectiveTerms,
+                totalObjectives);
+    }
+
+    private static String secondsSince(long startNanos) {
+        return String.format(Locale.ROOT, "%.3f", (System.nanoTime() - startNanos) / 1_000_000_000.0);
+    }
+
+    private interface BuildStep {
+        void run() throws IloException;
     }
 
     public void exportModelIfRequested() throws IloException {
@@ -109,30 +182,31 @@ public class CplexOriginalModel {
     public static CplexOriginalModel buildOriginalIntegratedModel(Instance instance, IloCplex cplex) throws IloException {
         CplexOriginalModel model = new CplexOriginalModel(instance, cplex);
 
-        model.initVarX();
-        model.initVarY();
-        model.initVarZ();
-        model.initVarW();
-        model.initVarDeltaU();
-        model.initVarDeltaL();
-        model.initVarEpsilonSigma();
-        model.initVarRho();
-        model.initVarRoadFlow();
+        model.logBuildStart("original integrated model");
+        model.runBuildStep("variables/X", model::initVarX);
+        model.runBuildStep("variables/Y", model::initVarY);
+        model.runBuildStep("variables/Z", model::initVarZ);
+        model.runBuildStep("variables/W", model::initVarW);
+        model.runBuildStep("variables/DeltaU", model::initVarDeltaU);
+        model.runBuildStep("variables/DeltaL", model::initVarDeltaL);
+        model.runBuildStep("variables/EpsilonSigma", model::initVarEpsilonSigma);
+        model.runBuildStep("variables/Rho", model::initVarRho);
+        model.runBuildStep("variables/RoadFlow", model::initVarRoadFlow);
 
-        model.initYardTemplateConstraints();
-        model.initStorageAllocationConstraints();
-        model.initOriginalHandlingTimeConstraints();
-        model.initCongestionConstraints();
+        model.runBuildStep("constraints/YardTemplate", model::initYardTemplateConstraints);
+        model.runBuildStep("constraints/StorageAllocation", model::initStorageAllocationConstraints);
+        model.runBuildStep("constraints/OriginalHandlingTime", model::initOriginalHandlingTimeConstraints);
+        model.runBuildStep("constraints/Congestion", model::initCongestionConstraints);
 
-        model.initObjRoute();
-        model.initObjTime();
-        model.initObjCongestion();
-
-        cplex.addMinimize(cplex.sum(
+        model.runBuildStep("objective/Route", model::initObjRoute);
+        model.runBuildStep("objective/Time", model::initObjTime);
+        model.runBuildStep("objective/Congestion", model::initObjCongestion);
+        model.runBuildStep("objective/AddMinimize", () -> model.addMinimize(cplex.sum(
                 model.objRoute,
                 model.objTime,
                 model.objCongestion
-        ));
+        )));
+        model.logBuildSummary("original integrated model");
 
         return model;
     }
@@ -144,31 +218,32 @@ public class CplexOriginalModel {
     public static CplexOriginalModel buildCompactIntegratedModel(Instance instance, IloCplex cplex, String lpExportFileName) throws IloException {
         CplexOriginalModel model = new CplexOriginalModel(instance, cplex, lpExportFileName != null, lpExportFileName);
 
-        model.initVarX();
-        model.initVarY();
-        model.initVarZ();
-        model.initVarW();
-        model.initVarDeltaU();
-        model.initVarDeltaL();
-        model.initVarEpsilonSigma();
-        model.initVarRho();
-        model.initVarPi();
-        model.initVarRoadFlow();
+        model.logBuildStart("compact integrated model");
+        model.runBuildStep("variables/X", model::initVarX);
+        model.runBuildStep("variables/Y", model::initVarY);
+        model.runBuildStep("variables/Z", model::initVarZ);
+        model.runBuildStep("variables/W", model::initVarW);
+        model.runBuildStep("variables/DeltaU", model::initVarDeltaU);
+        model.runBuildStep("variables/DeltaL", model::initVarDeltaL);
+        model.runBuildStep("variables/EpsilonSigma", model::initVarEpsilonSigma);
+        model.runBuildStep("variables/Rho", model::initVarRho);
+        model.runBuildStep("variables/Pi", model::initVarPi);
+        model.runBuildStep("variables/RoadFlow", model::initVarRoadFlow);
 
-        model.initYardTemplateConstraints();
-        model.initStorageAllocationConstraints();
-        model.initBinaryHandlingTimeConstraints();
-        model.initCongestionConstraints();
+        model.runBuildStep("constraints/YardTemplate", model::initYardTemplateConstraints);
+        model.runBuildStep("constraints/StorageAllocation", model::initStorageAllocationConstraints);
+        model.runBuildStep("constraints/BinaryHandlingTime", model::initBinaryHandlingTimeConstraints);
+        model.runBuildStep("constraints/Congestion", model::initCongestionConstraints);
 
-        model.initObjRoute();
-        model.initObjTime();
-        model.initObjCongestion();
-
-        cplex.addMinimize(cplex.sum(
+        model.runBuildStep("objective/Route", model::initObjRoute);
+        model.runBuildStep("objective/Time", model::initObjTime);
+        model.runBuildStep("objective/Congestion", model::initObjCongestion);
+        model.runBuildStep("objective/AddMinimize", () -> model.addMinimize(cplex.sum(
                 model.objRoute,
                 model.objTime,
                 model.objCongestion
-        ));
+        )));
+        model.logBuildSummary("compact integrated model");
 
         return model;
     }
@@ -176,18 +251,18 @@ public class CplexOriginalModel {
     public static CplexOriginalModel buildYardTemplateStorageAllocationModel(Instance instance, IloCplex cplex) throws IloException {
         CplexOriginalModel model = new CplexOriginalModel(instance, cplex);
 
-        model.initVarX();
-        model.initVarY();
-        model.initVarZ();
-        model.initVarW();
+        model.logBuildStart("yard-template storage-allocation model");
+        model.runBuildStep("variables/X", model::initVarX);
+        model.runBuildStep("variables/Y", model::initVarY);
+        model.runBuildStep("variables/Z", model::initVarZ);
+        model.runBuildStep("variables/W", model::initVarW);
 
-        model.initYardTemplateConstraints();
-        model.initStorageAllocationConstraints();
+        model.runBuildStep("constraints/YardTemplate", model::initYardTemplateConstraints);
+        model.runBuildStep("constraints/StorageAllocation", model::initStorageAllocationConstraints);
 
-        model.initObjRoute();
-        model.cplex.addMinimize(
-                model.objRoute
-        );
+        model.runBuildStep("objective/Route", model::initObjRoute);
+        model.runBuildStep("objective/AddMinimize", () -> model.addMinimize(model.objRoute));
+        model.logBuildSummary("yard-template storage-allocation model");
 
         return model;
     }
@@ -841,7 +916,7 @@ public class CplexOriginalModel {
             for (VesselPeriod jq : instance.getSourceVesselPeriodsOf(ip))
                 for (Subblock k : instance.getSubblocks()) {
                     double distance = instance.getDistanceToSubblock(jq, k) + instance.getDistanceFromSubblock(ip, k);
-                    objRoute.addTerm(distance * instance.etaRoute, varW.get(jq).get(ip).get(k));
+                    addObjectiveTerm(objRoute, distance * instance.etaRoute, varW.get(jq).get(ip).get(k));
                 }
     }
 
@@ -849,15 +924,15 @@ public class CplexOriginalModel {
         objTime = cplex.linearNumExpr();
         for (Vessel i : instance.getVessels())
             for (VesselPeriod ip : i.getPeriods()) {
-                objTime.addTerm(ip.getEarlinessCost(), varIota.get(ip));
-                objTime.addTerm(ip.getTardinessCost(), varKappa.get(ip));
+                addObjectiveTerm(objTime, ip.getEarlinessCost(), varIota.get(ip));
+                addObjectiveTerm(objTime, ip.getTardinessCost(), varKappa.get(ip));
             }
     }
 
     private void initObjCongestion() throws IloException {
         objCongestion = cplex.linearNumExpr();
-        objCongestion.addTerm(1 * instance.etaCongestion, varUnloadOverload);
-        objCongestion.addTerm(1 * instance.etaCongestion, varLoadOverload);
+        addObjectiveTerm(objCongestion, instance.etaCongestion, varUnloadOverload);
+        addObjectiveTerm(objCongestion, instance.etaCongestion, varLoadOverload);
     }
 
 

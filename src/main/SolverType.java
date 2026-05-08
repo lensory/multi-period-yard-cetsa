@@ -2,6 +2,7 @@ package main;
 
 public enum SolverType {
     CPLEX_INTEGRATED_MODEL("cplexIntegrated"),
+    FLOW_BASED_CPLEX_INTEGRATED_MODEL("flowBasedCplex"),
     SEQUENTIAL_DECISION("cplexSequential"),
     MASTER_HEURISTIC_INTEGRATED_SUBPROBLEM_CPLEX("masterHeuristic"),
     REPEATEDLY_MASTER_HEURISTIC_INTEGRATED_SUBPROBLEM_CPLEX("repeatedMasterHeuristic"),
@@ -18,6 +19,8 @@ public enum SolverType {
     public static SolverType fromName(String name) {
         return switch (name.toLowerCase()) {
             case "cplex", "cplex_integrated", "cplexintegrated", "cplex_integrated_model" -> CPLEX_INTEGRATED_MODEL;
+            case "flow_cplex", "flowbased", "flowbased_cplex", "flow_based_cplex", "flowbasedcplex" ->
+                    FLOW_BASED_CPLEX_INTEGRATED_MODEL;
             case "sequential", "sequential_decision", "cplexsequential" -> SEQUENTIAL_DECISION;
             case "master_heuristic", "masterheuristic" -> MASTER_HEURISTIC_INTEGRATED_SUBPROBLEM_CPLEX;
             case "repeated_master_heuristic", "repeatedmasterheuristic" ->

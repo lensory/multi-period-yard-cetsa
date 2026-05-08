@@ -3,14 +3,15 @@ package solver;
 import entity.*;
 import ilog.concert.IloException;
 import ilog.cplex.IloCplex;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import util.CapacityLimitedMapPriorityQueue;
 
-import java.io.PrintStream;
 import java.util.*;
 import java.util.stream.Collectors;
 
 public class DecomposedNeighborhoodSearch {
-    public PrintStream out = System.out;
+    private static final Logger LOGGER = LoggerFactory.getLogger(DecomposedNeighborhoodSearch.class);
 
     public int NEIGHBOR_LIMIT = 20;
     public int MAX_NO_BEST_ITERATIONS = 30;
@@ -84,6 +85,14 @@ public class DecomposedNeighborhoodSearch {
     public void setCplexParams(Integer timeLimit, Integer threads) {
         this.timeLimit = timeLimit;
         this.threads = threads;
+    }
+
+    private void logInfo(String message) {
+        LOGGER.info(message);
+    }
+
+    private void logInfof(String format, Object... args) {
+        LOGGER.info(String.format(Locale.ROOT, format, args));
     }
 
 
@@ -248,14 +257,14 @@ public class DecomposedNeighborhoodSearch {
 
         if (currentSolution != null) {
             if (verbose) {
-                out.println("Initial TemporarySolution by Heuristic: " + currentSolution.briefObjectives());
+                logInfo("Initial TemporarySolution by Heuristic: " + currentSolution.briefObjectives());
             }
             if (verboseLog) {
                 briefLog.append("Initial TemporarySolution by Heuristic: ").append(currentSolution.briefObjectives()).append("\n");
             }
         } else {
             if (verbose) {
-                out.println("No Initial TemporarySolution Found by Heuristic");
+                logInfo("No Initial TemporarySolution Found by Heuristic");
             }
             if (verboseLog) {
                 briefLog.append("No Initial TemporarySolution Found by Heuristic").append("\n");
@@ -273,14 +282,14 @@ public class DecomposedNeighborhoodSearch {
 
             if (currentSolution != null) {
                 if (verbose) {
-                    out.println("Shake " + shakes + ": Initial TemporarySolution by Heuristic: " + currentSolution.briefObjectives());
+                    logInfo("Shake " + shakes + ": Initial TemporarySolution by Heuristic: " + currentSolution.briefObjectives());
                 }
                 if (verboseLog) {
                     briefLog.append("Shake ").append(shakes).append(": Initial TemporarySolution by Heuristic: ").append(currentSolution.briefObjectives()).append("\n");
                 }
             } else {
                 if (verbose) {
-                    out.println("Shake " + shakes + ": No Initial TemporarySolution Found by Heuristic");
+                    logInfo("Shake " + shakes + ": No Initial TemporarySolution Found by Heuristic");
                 }
                 if (verboseLog) {
                     briefLog.append("Shake ").append(shakes).append(": No Initial TemporarySolution Found by Heuristic").append("\n");
@@ -306,7 +315,7 @@ public class DecomposedNeighborhoodSearch {
         currentSolution = evaluateAssignment(currentAssignment);
 
         if (verbose)
-            out.println((currentSolution != null ? "Initial TemporarySolution by Heuristic: " + currentSolution.briefObjectives()
+            logInfo((currentSolution != null ? "Initial TemporarySolution by Heuristic: " + currentSolution.briefObjectives()
                     : ": No Initial TemporarySolution Found by Heuristic"));
         if (verboseLog)
             briefLog.append(currentSolution != null ? "Initial TemporarySolution by Heuristic: " + currentSolution.briefObjectives()
@@ -321,7 +330,7 @@ public class DecomposedNeighborhoodSearch {
             currentSolution = evaluateAssignment(currentAssignment);
 
             if (verbose)
-                out.println("Shake " + shakes + ": " + (currentSolution != null ? "Initial TemporarySolution by Heuristic: " + currentSolution.briefObjectives()
+                logInfo("Shake " + shakes + ": " + (currentSolution != null ? "Initial TemporarySolution by Heuristic: " + currentSolution.briefObjectives()
                         : ": No Initial TemporarySolution Found by Heuristic"));
             if (verboseLog)
                 briefLog.append("Shake ").append(shakes).append(": ").append(currentSolution != null ? "Initial TemporarySolution by Heuristic: " + currentSolution.briefObjectives()
@@ -433,7 +442,7 @@ public class DecomposedNeighborhoodSearch {
                         evaluatedSolutions++;
                     }
                     if (verbose)
-                        out.printf("Attempt %d: %s, Elapsed time = %.2f sec, Evaluated solutions = %d.%n", heuristicAttempts,
+                        logInfof("Attempt %d: %s, Elapsed time = %.2f sec, Evaluated solutions = %d.%n", heuristicAttempts,
                                 (initialHeuristicSolution != null ? "Initial TemporarySolution by Heuristic: " + initialHeuristicSolution.briefObjectives()
                                         : "No Initial TemporarySolution Found by Heuristic"),
                                 (System.currentTimeMillis() - startTime) * 1. / 1000, evaluatedSolutions);
@@ -474,7 +483,7 @@ public class DecomposedNeighborhoodSearch {
                                 generateLimitedNeighbors() : generateRandomNeighbors(currentAssignment);
 
                         if (verbose)
-                            out.println(explored + "  Number of neighbors to be explored: " + neighbors.size());
+                            logInfo(explored + "  Number of neighbors to be explored: " + neighbors.size());
                         for (Map<VesselPeriod, Set<Subblock>> neighborAssignment : neighbors) {
                             if (timeLimit != null && (System.currentTimeMillis() - startTime) / 1000 >= timeLimit)
                                 break;
@@ -496,7 +505,7 @@ public class DecomposedNeighborhoodSearch {
 
                                 if (neighborSolution.getObjAll() < bestSolution.getObjAll() - PRECISION) {
                                     if (verbose)
-                                        out.printf("%d\t*** Neighbor TemporarySolution: %s, Elapsed time = %.2f sec, Evaluated solutions = %d.%n",
+                                        logInfof("%d\t*** Neighbor TemporarySolution: %s, Elapsed time = %.2f sec, Evaluated solutions = %d.%n",
                                                 explored, neighborSolution.briefObjectives(),
                                                 (System.currentTimeMillis() - startTime) * 1. / 1000, evaluatedSolutions);
 
@@ -509,7 +518,7 @@ public class DecomposedNeighborhoodSearch {
                                     if (meetBestAndBreak) break;
                                 } else if (neighborSolution.getObjAll() < currentSolution.getObjAll() - PRECISION) {
                                     if (verbose)
-                                        out.printf("%d\t+++ Neighbor TemporarySolution: %s, Elapsed time = %.2f sec, Evaluated solutions = %d.%n",
+                                        logInfof("%d\t+++ Neighbor TemporarySolution: %s, Elapsed time = %.2f sec, Evaluated solutions = %d.%n",
                                                 explored, neighborSolution.briefObjectives(),
                                                 (System.currentTimeMillis() - startTime) * 1. / 1000, evaluatedSolutions);
 
@@ -521,7 +530,7 @@ public class DecomposedNeighborhoodSearch {
                                 } else {
                                     updateCurrentCostsAverage(neighborCosts);
                                     if (verbose && !verboseBriefly)
-                                        out.printf("%d\t--- Neighbor TemporarySolution: %s, Elapsed time = %.2f sec, Evaluated solutions = %d.%n",
+                                        logInfof("%d\t--- Neighbor TemporarySolution: %s, Elapsed time = %.2f sec, Evaluated solutions = %d.%n",
                                                 explored, neighborSolution.briefObjectives(),
                                                 (System.currentTimeMillis() - startTime) * 1. / 1000, evaluatedSolutions);
                                 }
@@ -529,16 +538,16 @@ public class DecomposedNeighborhoodSearch {
                         }
                         if (!findFeasible) {
                             if (verbose)
-                                out.println(explored + "\t    " + "No Feasible TemporarySolution in Current TemporarySolution's Neighborhood (" + neighbors.size() + "[<=" + NEIGHBOR_LIMIT + "]).");
+                                logInfo(explored + "\t    " + "No Feasible TemporarySolution in Current TemporarySolution's Neighborhood (" + neighbors.size() + "[<=" + NEIGHBOR_LIMIT + "]).");
                             break;
                         }
                         noBestFoundIteration = isBestFound ? 0 : noBestFoundIteration + 1;
                         noImprovedIteration = isImprovedFound ? 0 : noImprovedIteration + 1;
                     }
                     if (verbose) {
-                        out.println("Neighborhood Search Ends With Best TemporarySolution: " + bestSolution.briefObjectives());
+                        logInfo("Neighborhood Search Ends With Best TemporarySolution: " + bestSolution.briefObjectives());
                         if (initialHeuristicSolution != null)
-                            out.printf("\t Improve %f %% from %s\n\n", 100 * (initialHeuristicSolution.getObjAll() - bestSolution.getObjAll()) / initialHeuristicSolution.getObjAll(), initialHeuristicSolution.briefObjectives());
+                            logInfof("\t Improve %f %% from %s%n%n", 100 * (initialHeuristicSolution.getObjAll() - bestSolution.getObjAll()) / initialHeuristicSolution.getObjAll(), initialHeuristicSolution.briefObjectives());
                     }
                 }
                 solver.cplex.clearModel();
@@ -583,7 +592,7 @@ public class DecomposedNeighborhoodSearch {
                         else
                             flag = false;
                         if (verbose)
-                            out.printf("%s\t+++ Local Refined TemporarySolution: %s, Elapsed time = %.2f sec, Evaluated solutions = %d.%n",
+                            logInfof("%s\t+++ Local Refined TemporarySolution: %s, Elapsed time = %.2f sec, Evaluated solutions = %d.%n",
                                     optimizeGivenTimeAssignment ? "OptGivenT" : "OptGivenK", integratedSolution.briefObjectives(),
                                     (System.currentTimeMillis() - startTime) * 1. / 1000, evaluatedSolutions);
 
@@ -594,8 +603,8 @@ public class DecomposedNeighborhoodSearch {
                         updateBestSolution(refinedSolution.getSubblockAssignments(), refinedSolution);
                     }
                     if (verbose) {
-                        out.println("Local Refinement Ends With Best TemporarySolution: " + bestSolution.briefObjectives());
-                        out.printf("\t Improve %f %% from current solution(%s)\n\n", 100 * (currentSolution.getObjAll() - refinedSolution.getObjAll()) / currentSolution.getObjAll(), currentSolution.briefObjectives());
+                        logInfo("Local Refinement Ends With Best TemporarySolution: " + bestSolution.briefObjectives());
+                        logInfof("\t Improve %f %% from current solution(%s)%n%n", 100 * (currentSolution.getObjAll() - refinedSolution.getObjAll()) / currentSolution.getObjAll(), currentSolution.briefObjectives());
                     }
                     if (refinedSolution.getObjAll() < currentSolution.getObjAll() - PRECISION)
                         updateCurrentSolution(refinedSolution.getSubblockAssignments(), refinedSolution);
@@ -605,14 +614,14 @@ public class DecomposedNeighborhoodSearch {
 
 
                 if (verbose) {
-                    out.println("Shake " + shakes + " Ends With: " + bestSolution.briefObjectives());
+                    logInfo("Shake " + shakes + " Ends With: " + bestSolution.briefObjectives());
                     if (previousBestSolution != null)
-                        out.printf("\t Improve %f %% from %s\n", 100 * (previousBestSolution.getObjAll() - bestSolution.getObjAll()) / previousBestSolution.getObjAll(),
+                        logInfof("\t Improve %f %% from %s%n", 100 * (previousBestSolution.getObjAll() - bestSolution.getObjAll()) / previousBestSolution.getObjAll(),
                                 previousBestSolution.briefObjectives());
-                    out.printf("Elapsed Time = %.2f sec, Evaluated solutions = %d.%n",
+                    logInfof("Elapsed Time = %.2f sec, Evaluated solutions = %d.%n",
                             (System.currentTimeMillis() - startTime) * 1. / 1000, evaluatedSolutions);
-                    out.println("-".repeat(100));
-                    out.println();
+                    logInfo("-".repeat(100));
+                    logInfo("");
                 }
 
 
@@ -644,7 +653,7 @@ public class DecomposedNeighborhoodSearch {
 
 
         } catch (IloException e) {
-            e.printStackTrace(out);
+            LOGGER.error("Failed during decomposed neighborhood search.", e);
             throw new RuntimeException(e);
         }
 
@@ -694,7 +703,7 @@ public class DecomposedNeighborhoodSearch {
 
             if (attempts >= MAX_SHAKE_ATTEMPTS) {
                 if (verbose) {
-                    out.println("Reached the maximal shake attempts for new Priority (" + MAX_SHAKE_ATTEMPTS + ")");
+                    logInfo("Reached the maximal shake attempts for new Priority (" + MAX_SHAKE_ATTEMPTS + ")");
                 }
                 break;
             }
@@ -1199,7 +1208,7 @@ public class DecomposedNeighborhoodSearch {
                 solution.calculateObjectives();
             return solution;
         } catch (IloException e) {
-            e.printStackTrace(out);
+            LOGGER.error("Failed to evaluate neighborhood assignment.", e);
             throw new RuntimeException(e);
         }
     }

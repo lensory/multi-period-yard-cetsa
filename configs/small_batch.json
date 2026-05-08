@@ -1,24 +1,20 @@
 {
   "defaults": {
-    "solver"         : "cplex",
     "write"          : true,
     "export_lp"      : false,
     "timelimit"      : 600,
-    "threads"        : 3,
-    "rss_limit_mb"   : 512,
-    "work_mem_mb"    : 256,
-    "tree_mem_mb"    : 512,
+    "cplex_threads"  : 3,
+    "rss_limit"      : "512m",
+    "work_mem"       : "256m",
+    "tree_mem"       : "512m",
     "memory_emphasis": false,
     "mip_display"    : 2
   },
-  "launcher": {"processes": 2, "heap_mb": 512, "fail_fast": false},
+  "launcher": {"parallel_configs": 2, "heap": "512m"},
   "sweep"   : {
-    "vessels": [ [4, 1, 1] ],
+    "vessels": [ [2, 0, 1] ],
     "rows"   : [6],
-    "seeds"  : "1",
-    "solver" : ["cplex"]
-  },
-  "runs"    : [
-    { "vessels": [4, 0, 2], "rows": 4, "cols": 2, "seed": 1, "solver": "cplex", "timelimit": 900 }
-  ]
+    "seeds"  : "1-3",
+    "solver" : ["cplex", "flow_cplex"]
+  }
 }

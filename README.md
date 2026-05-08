@@ -9,8 +9,8 @@ Code for container terminal yard template planning and loading/unloading schedul
 - `src/dto` JSON/CSV data transfer objects
 - `src/util` utilities
 - `input/` instances (JSON, can be generated)
-- `output/` solutions (`solution_*`)
-- `log/` run logs
+- `output/` experiment directories, each containing `experiment.log`, optional `model.lp`, and solution CSV files
+- `log/` legacy run logs
 - `linux/` legacy batch logs and statistics
 
 **Dependencies**
@@ -19,25 +19,25 @@ Code for container terminal yard template planning and loading/unloading schedul
 - Bundled libs: Jackson + Commons CSV under `lib/`
 
 **Run**
-- Recommended: run `main.Runner` in your IDE with `lib/*.jar` and CPLEX jars on the classpath
+- Recommended: run `main.Main` in your IDE with `lib/*.jar` and CPLEX jars on the classpath
 - Command-line example (adjust CPLEX path to your installation)
 
 ```bash
 javac -cp "lib/*;path/to/cplex/*" -d out $(git ls-files "src/**/*.java")
-java -cp "out;lib/*;path/to/cplex/*" main.Runner 
-parallel=true processes=2 solver=local_refinement vessel=(2,0,1) rows=6 seed=1-5 write=false timelimit=3600 threads=4
+java -cp "out;lib/*;path/to/cplex/*" main.Main 
+parallel_configs=2 solver=local_refinement vessel=(2,0,1) rows=6 seed=1-5 write=false timelimit=3600 cplex_threads=4
 ```
 
 **Common Parameters (`main.Params`)**
-- `solver`: solver type, supports `cplex`, `sequential`, `decomposed`, `local_refinement`, etc.
+- `solver`: solver type, supports `cplex`, `flow_cplex`, `sequential`, `decomposed`, `local_refinement`, etc.
 - `vessel`/`vessels`: vessel-count tuples like `(2,0,1)` or `(2,0,1),(2,1,0)`
 - `small`/`medium`/`large`: counts of small/medium/large vessels
 - `rows`/`cols`: yard rows/cols (`cols` auto-computed if omitted)
 - `seeds`: random seed ranges like `1-5,7,9-11`
 - `timelimit`: time limit in seconds
-- `threads`: thread count
+- `cplex_threads`: CPLEX thread count
 - `write`: write solutions (`true/false`)
-- `parallel`, `processes`: parallel batch runs
+- `parallel_configs`: number of concurrently running config experiments
 
 **Tools**
 - `main.InstanceGenerator`: generate instance JSON

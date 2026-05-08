@@ -1,13 +1,13 @@
 package util;
 
-import ilog.concert.IloException;
 import ilog.cplex.IloCplex;
-import main.Params;
+import main.Experiment;
+import org.slf4j.Logger;
+import org.slf4j.MDC;
 
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
-import java.io.PrintStream;
 import java.lang.management.BufferPoolMXBean;
 import java.lang.management.ManagementFactory;
 import java.lang.management.MemoryMXBean;
@@ -17,11 +17,13 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 public class RunContext implements AutoCloseable {
-    private static final long DEFAULT_RSS_CHECK_INTERVAL_MS = 1000L;
+    private static final long DEFAULT_RSS_CHECK_INTERVAL_MS = 5_000L;
     private static final long DEFAULT_MEMORY_LOG_INTERVAL_MS = 30_000L;
     private static final long BYTES_PER_MB = 1024L * 1024L;
 
@@ -33,8 +35,9 @@ public class RunContext implements AutoCloseable {
         MANUAL_STOP
     }
 
-    private final Params params;
-    private final PrintStream out;
+    private final Experiment experiment;
+    private final Logger logger;
+    private final Map<String, String> mdcContext;
 
 
     private final long startTimeMillis;
@@ -50,29 +53,27 @@ public class RunContext implements AutoCloseable {
 
     private volatile StopReason stopReason = StopReason.NONE;
 
-    private final AtomicBoolean memoryExceeded = new AtomicBoolean(false);
-
-    private final ConcurrentHashMap<IloCplex, IloCplex.Aborter> aborters =
-            new ConcurrentHashMap<>();
+    private final Set<IloCplex.Aborter> aborters = ConcurrentHashMap.newKeySet();
     private Thread monitorThread;
 
-    public RunContext(Params params, PrintStream out) {
-        this.params = params;
-        this.out = out;
+    public RunContext(Experiment experiment, Logger logger) {
+        this.experiment = experiment;
+        this.logger = logger;
+        this.mdcContext = MDC.getCopyOfContextMap();
 
         this.startTimeMillis = System.currentTimeMillis();
-        this.deadlineMillis = params.timeLimit == null ? null :
-                this.startTimeMillis + params.timeLimit * 1000L;
-        this.rssLimitMb = params.rssLimitMb;
-        this.checkIntervalMillis = params.rssCheckIntervalMs == null ? DEFAULT_RSS_CHECK_INTERVAL_MS : params.rssCheckIntervalMs;
-        this.memoryLogIntervalMillis = params.memoryLogIntervalMs != null ? params.memoryLogIntervalMs :
-                (params.rssLimitMb == null || params.rssLimitMb <= 0 ? 0L : DEFAULT_MEMORY_LOG_INTERVAL_MS);
+        this.deadlineMillis = experiment.timeLimit == null ? null :
+                this.startTimeMillis + experiment.timeLimit * 1000L;
+        this.rssLimitMb = experiment.rssLimitMb;
+        this.checkIntervalMillis = experiment.rssCheckIntervalMs == null ? DEFAULT_RSS_CHECK_INTERVAL_MS : experiment.rssCheckIntervalMs;
+        this.memoryLogIntervalMillis = experiment.memoryLogIntervalMs != null ? experiment.memoryLogIntervalMs :
+                (experiment.rssLimitMb == null || experiment.rssLimitMb <= 0 ? 0L : DEFAULT_MEMORY_LOG_INTERVAL_MS);
         this.nextMemoryLogMillis = this.startTimeMillis;
 
     }
 
     public void startMonitor() {
-        if ((params.rssLimitMb == null || params.rssLimitMb <= 0)
+        if ((experiment.rssLimitMb == null || experiment.rssLimitMb <= 0)
                 && deadlineMillis == null
                 && memoryLogIntervalMillis <= 0) {
             return;
@@ -86,7 +87,7 @@ public class RunContext implements AutoCloseable {
                 }
 
                 if (memoryLogIntervalMillis > 0 && now >= nextMemoryLogMillis) {
-                    out.println(memorySummary() + memoryLimitsSummary());
+                    logInfo(memorySummary());
                     nextMemoryLogMillis = now + memoryLogIntervalMillis;
                 }
 
@@ -121,8 +122,26 @@ public class RunContext implements AutoCloseable {
     public void requestStop(StopReason reason, String message) {
         if (stopRequested.compareAndSet(false, true)) {
             stopReason = reason;
-            out.println("[RunContext] Stop requested: " + reason + ". " + message);
+            logInfo("Stop requested: {}. {}", reason, message);
             abortAllCplexSolvers();
+        }
+    }
+
+    private void logInfo(String format, Object... arguments) {
+        Map<String, String> previous = MDC.getCopyOfContextMap();
+        try {
+            if (mdcContext == null) {
+                MDC.clear();
+            } else {
+                MDC.setContextMap(mdcContext);
+            }
+            logger.info(format, arguments);
+        } finally {
+            if (previous == null) {
+                MDC.clear();
+            } else {
+                MDC.setContextMap(previous);
+            }
         }
     }
 
@@ -262,7 +281,7 @@ public class RunContext implements AutoCloseable {
         return Runtime.getRuntime().maxMemory() / 1024 / 1024;
     }
 
-    public static String memorySummary() {
+    public String memorySummary() {
         MemoryMXBean memoryBean = ManagementFactory.getMemoryMXBean();
         MemoryUsage heap = memoryBean.getHeapMemoryUsage();
         MemoryUsage nonHeap = memoryBean.getNonHeapMemoryUsage();
@@ -279,25 +298,38 @@ public class RunContext implements AutoCloseable {
         long nativeApproxMb = rssMb < 0 ? -1 : Math.max(0, rssMb - knownJvmMb);
 
         return String.format(
-                "[RunContext] Memory: RSS=%d MB, heap=%d/%d/%d MB (used/committed/max), " +
+                "Memory: RSS=%s MB (used/max), heap=%d/%d/%d MB (used/committed/max), " +
                         "nonHeap=%d/%d MB (used/committed), direct=%d MB, mapped=%d MB, " +
-                        "nativeOtherApprox=%d MB",
-                rssMb,
+                        "nativeOtherApprox=%s MB",
+                memoryUsedMax(rssMb, rssLimitMb),
                 heapUsedMb, heapCommittedMb, heapMaxMb,
                 nonHeapUsedMb, nonHeapCommittedMb,
                 directMb, mappedMb,
-                nativeApproxMb
+                unknownIfNegative(nativeApproxMb)
         );
     }
 
-    private String memoryLimitsSummary() {
+    private static String memoryUsedMax(long usedMb, Integer maxMb) {
+        return unknownIfNegative(usedMb) + "/" + (maxMb == null || maxMb <= 0 ? "none" : maxMb.toString());
+    }
+
+    public String memoryConfigSummary() {
         return String.format(
-                ", limits: rss_limit=%s MB, work_mem=%s MB, tree_mem=%s MB, heap_max=%d MB",
-                params.rssLimitMb == null ? "none" : params.rssLimitMb.toString(),
-                params.workMemMb == null ? "default" : params.workMemMb.toString(),
-                params.treeMemMb == null ? "default" : params.treeMemMb.toString(),
-                getMaxHeapMb()
+                "memory: rss_limit=%s, work_mem=%s, tree_mem=%s, heap_max=%d MB, memory_log_interval=%s",
+                memoryConfigMb(experiment.rssLimitMb, "none"),
+                memoryConfigMb(experiment.workMemMb, "default"),
+                memoryConfigMb(experiment.treeMemMb, "default"),
+                getMaxHeapMb(),
+                memoryLogIntervalMillis <= 0 ? "disabled" : memoryLogIntervalMillis + " ms"
         );
+    }
+
+    private static String memoryConfigMb(Integer valueMb, String defaultValue) {
+        return valueMb == null ? defaultValue : valueMb + " MB";
+    }
+
+    private static String unknownIfNegative(long value) {
+        return value < 0 ? "unknown" : Long.toString(value);
     }
 
     private static long bytesToMb(long bytes) {
@@ -319,24 +351,21 @@ public class RunContext implements AutoCloseable {
         return bytesToMb(bytes);
     }
 
-    public void registerCplex(IloCplex cplex) throws IloException {
-        IloCplex.Aborter aborter = new IloCplex.Aborter();
-        cplex.use(aborter);
-        aborters.put(cplex, aborter);
-
+    public void registerAborter(IloCplex.Aborter aborter) {
+        aborters.add(aborter);
         if (shouldStop()) {
             aborter.abort();
         }
     }
 
-    public void unregisterCplex(IloCplex cplex) {
-        if (cplex != null) {
-            aborters.remove(cplex);
+    public void unregisterAborter(IloCplex.Aborter aborter) {
+        if (aborter != null) {
+            aborters.remove(aborter);
         }
     }
 
     private void abortAllCplexSolvers() {
-        for (IloCplex.Aborter aborter : aborters.values()) {
+        for (IloCplex.Aborter aborter : aborters) {
             try {
                 aborter.abort();
             } catch (Exception ignored) {
@@ -355,10 +384,10 @@ public class RunContext implements AutoCloseable {
 
     public String summary() {
         return String.format(
-                "elapsed=%.2fs, remaining=%.2fs, RSS=%d MB, heap=%d/%d MB (used/max), stop=%s",
+                "elapsed=%.2fs, remaining=%.2fs, RSS=%s MB (used/max), heap=%d/%d MB (used/max), stop=%s",
                 elapsedSeconds(),
                 remainingSeconds(),
-                getCurrentRssMb(),
+                memoryUsedMax(getCurrentRssMb(), rssLimitMb),
                 getUsedHeapMb(),
                 getMaxHeapMb(),
                 getStopReason()

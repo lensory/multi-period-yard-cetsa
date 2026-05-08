@@ -14,11 +14,10 @@ import java.util.Objects;
 
 public class Params {
     public static final String USAGE =
-            "Usage: java main.Runner [key=value...]\n" +
+            "Usage: java main.Main [key=value...]\n" +
                     "Parameters (all optional, default values shown):\n" +
                     "  config      - Read batch configuration JSON\n" +
-                    "  worker      - Internal launcher flag [true|false] (default: false)\n" +
-                    "  solver      - Solver type [cplex|sequential|decomposed|local_refinement] (default: cplex)\n" +
+                    "  solver      - Solver type [cplex|flow_cplex|sequential|decomposed|local_refinement] (default: cplex)\n" +
                     "  vessel      - Number of vessels for different types (e.g., (2,0,1),(2,1,0) )\n" +
                     "  small       - Number of small vessels (default: 2)\n" +
                     "  medium      - Number of medium vessels (default: 0)\n" +
@@ -29,99 +28,59 @@ public class Params {
                     "  write       - Enable solution output [true|false] (default: false)\n" +
                     "  export_lp   - Export CPLEX original model LP [true|false] (default: false)\n" +
                     "  timelimit   - Solver time limit in seconds (default: no limit)\n" +
-                    "  threads     - CPU thread count (default: no limit)\n" +
-                    "  parallel    - legacy same-JVM parallel testing [true|false] (default: false)\n" +
-                    "  processes   - launcher child JVM count\n" +
-                    "  heap_mb      - launcher child JVM -Xmx value\n" +
-                    "  fail_fast   - stop launching after first failed child process [true|false] (default: false)\n\n" +
+                    "  cplex_threads - CPLEX thread count (default: no limit)\n" +
+                    "  parallel_configs - concurrently running config experiments\n" +
+                    "  heap        - launcher child JVM -Xmx value, size format like 512m or 8g\n" +
+                    "  rss_limit   - RSS stop limit, size format like 4096m or 4g\n" +
+                    "  work_mem    - CPLEX work memory, size format like 2048m or 2g\n" +
+                    "  tree_mem    - CPLEX MIP tree memory, size format like 4096m or 4g\n\n" +
                     "Examples:\n" +
-                    "  java main.Runner solver=sequential small=3 medium=0 large=2 timelimit=1800\n" +
-                    "  java main.Runner seeds=1,3-5 write=true\n" +
-                    "  java main.Runner config=configs.json processes=4 heap_mb=8192";
-
-
-    public SolverType solver;
-    public boolean write;
-    public boolean exportLp;
-    public Integer timeLimit;
-    public Integer threads;
-    public boolean parallel;
-    public Integer processes;
-    public Integer workMemMb;
-    public Integer treeMemMb;
-    public Integer rssLimitMb;
-    public Integer nodeFile;
-    public Integer mipDisplay;
-    public String workDir;
-    public String mipEmphasis;
-    public boolean memoryEmphasis;
-
-    public Long rssCheckIntervalMs;
-    public Long memoryLogIntervalMs;
+                    "  java main.Main solver=sequential small=3 medium=0 large=2 timelimit=1800\n" +
+                    "  java main.Main seeds=1,3-5 write=true\n" +
+                    "  java main.Main config=configs.json parallel_configs=4 heap=8g";
 
     public String configFile;
     public String batchName;
-    public boolean worker;
+    public Integer parallelConfigs;
     public Integer heapMb;
-    public boolean failFast;
-    public Long parentPid;
-
-    public List<VesselConfig> configs;
-    public List<Params> experiments;
-
-    private List<int[]> vessels;
-    private Integer small;
-    private Integer medium;
-    private Integer large;
-    private Integer rows;
-    private Integer cols;
-    private IntervalSet seeds;
-
-    public static class VesselConfig {
-        public int small;
-        public int medium;
-        public int large;
-        public int rows;
-        public int cols;
-        public int seed;
-
-        public String name;
-
-        public VesselConfig(int small, int medium, int large, int rows, int cols, int seed) {
-            this.small = small;
-            this.medium = medium;
-            this.large = large;
-            this.rows = rows;
-            this.cols = cols;
-            this.seed = seed;
-            this.name = String.format("{%02d-%02d-%02d}_{%02d-%02d}_%02d",
-                    small, medium, large,
-                    rows, cols, seed);
-        }
-
-        public String toString() {
-            return name;
-        }
-    }
+    public List<Experiment> experiments;
 
     public static Params parse(String[] args) {
         try {
-            Map<String, String> cliArgs = parseArgMap(args);
-            if (cliArgs.containsKey("config") && !parseOptionalBoolean(cliArgs.get("worker"))) {
+            Map<String, String> cliArgs = Experiment.parseArgMap(args);
+            if (cliArgs.containsKey("config")) {
                 return parseConfig(cliArgs);
             }
-
-            Params params = new Params();
-            params.applyArgs(cliArgs);
-            params.validate();
-            params.autoFill();
-            return params;
+            return parseCliBatch(cliArgs);
         } catch (IllegalArgumentException e) {
             System.err.println("Parameter error: " + e.getMessage());
             System.err.println(USAGE);
             System.exit(1);
             return null;
         }
+    }
+
+    private static Params parseCliBatch(Map<String, String> cliArgs) {
+        Params launcher = new Params();
+        launcher.applyLauncherArgs(launcherArgs(cliArgs));
+        launcher.experiments = new ArrayList<>();
+
+        for (Map<String, String> experimentArgs : expandCliExperiments(cliArgs)) {
+            ExperimentTemplate template = new ExperimentTemplate();
+            template.applyArgs(experimentArgs);
+            addConcreteExperiments(launcher.experiments, template);
+        }
+
+        if (launcher.experiments.isEmpty()) {
+            throw new IllegalArgumentException("No experiments generated from command line");
+        }
+        for (Experiment experiment : launcher.experiments) {
+            if (experiment.batchName == null || experiment.batchName.isBlank()) {
+                experiment.batchName = launcher.batchName;
+            }
+        }
+        launcher.validateLauncher();
+        return launcher;
     }
 
     private static Params parseConfig(Map<String, String> cliArgs) {
@@ -137,16 +96,15 @@ public class Params {
         }
 
         Map<String, String> defaultArgs = jsonObjectToArgs(root.path("defaults"));
-        Map<String, String> workerCliOverrides = workerCliOverrides(cliArgs);
+        Map<String, String> experimentCliOverrides = experimentCliOverrides(cliArgs);
 
         Params launcher = new Params();
         launcher.configFile = configFile;
         launcher.batchName = configBaseName(configFile);
-        launcher.applyArgs(defaultArgs);
         if (root.has("launcher")) {
-            launcher.applyArgs(jsonObjectToArgs(root.get("launcher")));
+            launcher.applyLauncherArgs(jsonObjectToArgs(root.get("launcher")));
         }
-        launcher.applyArgs(cliArgs);
+        launcher.applyLauncherArgs(launcherArgs(cliArgs));
         launcher.experiments = new ArrayList<>();
 
         boolean hasSweep = root.has("sweep") && root.get("sweep").isObject() && root.get("sweep").fieldNames().hasNext();
@@ -154,12 +112,12 @@ public class Params {
 
         if (hasSweep) {
             for (Map<String, String> sweepArgs : expandSweep(root.get("sweep"))) {
-                Params experiment = new Params();
-                experiment.batchName = launcher.batchName;
-                experiment.applyArgs(defaultArgs);
-                experiment.applyArgs(sweepArgs);
-                experiment.applyArgs(workerCliOverrides);
-                addConcreteExperiments(launcher.experiments, experiment);
+                ExperimentTemplate template = new ExperimentTemplate();
+                template.batchName = launcher.batchName;
+                template.applyArgs(defaultArgs);
+                template.applyArgs(sweepArgs);
+                template.applyArgs(experimentCliOverrides);
+                addConcreteExperiments(launcher.experiments, template);
             }
         }
 
@@ -168,21 +126,21 @@ public class Params {
                 if (!runNode.isObject()) {
                     throw new IllegalArgumentException("Every item in runs must be a JSON object");
                 }
-                Params experiment = new Params();
-                experiment.batchName = launcher.batchName;
-                experiment.applyArgs(defaultArgs);
-                experiment.applyArgs(jsonObjectToArgs(runNode));
-                experiment.applyArgs(workerCliOverrides);
-                addConcreteExperiments(launcher.experiments, experiment);
+                ExperimentTemplate template = new ExperimentTemplate();
+                template.batchName = launcher.batchName;
+                template.applyArgs(defaultArgs);
+                template.applyArgs(jsonObjectToArgs(runNode));
+                template.applyArgs(experimentCliOverrides);
+                addConcreteExperiments(launcher.experiments, template);
             }
         }
 
         if (!hasSweep && !hasRuns) {
-            Params experiment = new Params();
-            experiment.batchName = launcher.batchName;
-            experiment.applyArgs(defaultArgs);
-            experiment.applyArgs(workerCliOverrides);
-            addConcreteExperiments(launcher.experiments, experiment);
+            ExperimentTemplate template = new ExperimentTemplate();
+            template.batchName = launcher.batchName;
+            template.applyArgs(defaultArgs);
+            template.applyArgs(experimentCliOverrides);
+            addConcreteExperiments(launcher.experiments, template);
         }
 
         if (launcher.experiments.isEmpty()) {
@@ -192,45 +150,98 @@ public class Params {
         return launcher;
     }
 
-    private static void addConcreteExperiments(List<Params> experiments, Params experiment) {
-        experiment.validate();
-        experiment.autoFill();
-
-        for (VesselConfig config : experiment.configs) {
-            Params concrete = experiment.copyRunSettings();
-            concrete.vessels = new ArrayList<>();
-            concrete.vessels.add(new int[]{config.small, config.medium, config.large});
-            concrete.small = null;
-            concrete.medium = null;
-            concrete.large = null;
-            concrete.rows = config.rows;
-            concrete.cols = config.cols;
-            concrete.seeds = IntervalSet.of(config.seed);
-            concrete.configs = new ArrayList<>();
-            concrete.configs.add(config);
-            concrete.worker = true;
-            concrete.batchName = experiment.batchName;
-            experiments.add(concrete);
+    private void applyLauncherArgs(Map<String, String> args) {
+        for (Map.Entry<String, String> entry : args.entrySet()) {
+            String key = Experiment.normalizeKey(entry.getKey());
+            String value = entry.getValue();
+            switch (key) {
+                case "config" -> this.configFile = value;
+                case "batch_name" -> this.batchName = Experiment.sanitizeName(value);
+                case "parallel_configs", "parallel_runs" -> this.parallelConfigs = Experiment.parseInt(value, key);
+                case "heap", "xmx", "heap_mb", "xmx_mb" -> this.heapMb = Experiment.parseMemorySizeMb(value, key);
+                default -> throw new IllegalArgumentException("Unknown launcher parameter: " + key);
+            }
         }
     }
 
-    private static String configBaseName(String configFile) {
-        String name = new File(configFile).getName();
-        int dot = name.lastIndexOf('.');
-        if (dot > 0) {
-            name = name.substring(0, dot);
+    private void validateLauncher() {
+        if (parallelConfigs != null) {
+            checkRange(parallelConfigs, 1, 1024, "parallel_configs");
         }
-        return sanitizeName(name);
+        if (heapMb != null) {
+            checkRange(heapMb, 128, 1024 * 1024, "heap");
+        }
     }
 
-    private static String sanitizeName(String name) {
-        return name.replaceAll("[^A-Za-z0-9._-]", "_");
+    private static Map<String, String> launcherArgs(Map<String, String> args) {
+        Map<String, String> result = new LinkedHashMap<>();
+        for (Map.Entry<String, String> entry : args.entrySet()) {
+            String key = Experiment.normalizeKey(entry.getKey());
+            if (isLauncherOnlyKey(key) || key.equals("config") || key.equals("batch_name")) {
+                result.put(key, entry.getValue());
+            }
+        }
+        return result;
+    }
+
+    private static Map<String, String> experimentCliOverrides(Map<String, String> cliArgs) {
+        Map<String, String> overrides = new LinkedHashMap<>();
+        for (Map.Entry<String, String> entry : cliArgs.entrySet()) {
+            String key = Experiment.normalizeKey(entry.getKey());
+            if (!isLauncherOnlyKey(key) && !key.equals("config") && !key.equals("batch_name")) {
+                overrides.put(key, entry.getValue());
+            }
+        }
+        return overrides;
+    }
+
+    private static boolean isLauncherOnlyKey(String key) {
+        return key.equals("parallel_configs") || key.equals("parallel_runs") ||
+                key.equals("heap") || key.equals("xmx") ||
+                key.equals("heap_mb") || key.equals("xmx_mb");
+    }
+
+    private static List<Map<String, String>> expandCliExperiments(Map<String, String> args) {
+        List<Map.Entry<String, List<String>>> dimensions = new ArrayList<>();
+        for (Map.Entry<String, String> entry : args.entrySet()) {
+            String key = Experiment.normalizeKey(entry.getKey());
+            if (!isLauncherOnlyKey(key) && !key.equals("config") && !key.equals("batch_name")) {
+                dimensions.add(Map.entry(key, expandCliValues(key, entry.getValue())));
+            }
+        }
+
+        List<Map<String, String>> results = new ArrayList<>();
+        results.add(new LinkedHashMap<>());
+        for (Map.Entry<String, List<String>> dimension : dimensions) {
+            List<Map<String, String>> next = new ArrayList<>();
+            for (Map<String, String> partial : results) {
+                for (String value : dimension.getValue()) {
+                    Map<String, String> copy = new LinkedHashMap<>(partial);
+                    copy.put(dimension.getKey(), value);
+                    next.add(copy);
+                }
+            }
+            results = next;
+        }
+        return results;
+    }
+
+    private static List<String> expandCliValues(String rawKey, String value) {
+        String key = Experiment.normalizeKey(rawKey);
+        if (key.equals("seed") || key.equals("seeds")) {
+            List<String> values = new ArrayList<>();
+            for (int seed : parseSeeds(value, rawKey)) {
+                values.add(Integer.toString(seed));
+            }
+            return values;
+        }
+        return splitTopLevelComma(value);
     }
 
     private static List<Map<String, String>> expandSweep(JsonNode sweepNode) {
         List<Map.Entry<String, List<String>>> dimensions = new ArrayList<>();
         sweepNode.properties().forEach(entry ->
-                dimensions.add(Map.entry(normalizeKey(entry.getKey()), expandSweepValues(entry.getKey(), entry.getValue()))));
+                dimensions.add(Map.entry(Experiment.normalizeKey(entry.getKey()), expandSweepValues(entry.getKey(), entry.getValue()))));
 
         List<Map<String, String>> results = new ArrayList<>();
         results.add(new LinkedHashMap<>());
@@ -249,17 +260,17 @@ public class Params {
     }
 
     private static List<String> expandSweepValues(String rawKey, JsonNode valueNode) {
-        String key = normalizeKey(rawKey);
+        String key = Experiment.normalizeKey(rawKey);
         if (key.equals("seed") || key.equals("seeds")) {
             List<String> values = new ArrayList<>();
             if (valueNode.isArray()) {
                 for (JsonNode node : valueNode) {
-                    for (int seed : new Params().parseSeeds(jsonValueToString(rawKey, node), rawKey)) {
+                    for (int seed : parseSeeds(jsonValueToString(rawKey, node), rawKey)) {
                         values.add(Integer.toString(seed));
                     }
                 }
             } else {
-                for (int seed : new Params().parseSeeds(jsonValueToString(rawKey, valueNode), rawKey)) {
+                for (int seed : parseSeeds(jsonValueToString(rawKey, valueNode), rawKey)) {
                     values.add(Integer.toString(seed));
                 }
             }
@@ -298,12 +309,12 @@ public class Params {
         }
 
         objectNode.properties().forEach(entry ->
-                args.put(normalizeKey(entry.getKey()), jsonValueToString(entry.getKey(), entry.getValue())));
+                args.put(Experiment.normalizeKey(entry.getKey()), jsonValueToString(entry.getKey(), entry.getValue())));
         return args;
     }
 
     private static String jsonValueToString(String rawKey, JsonNode node) {
-        String key = normalizeKey(rawKey);
+        String key = Experiment.normalizeKey(rawKey);
         if (key.equals("vessel") || key.equals("vessels")) {
             if (node.isTextual()) {
                 return node.asText();
@@ -334,6 +345,55 @@ public class Params {
         throw new IllegalArgumentException("Unsupported JSON value for " + rawKey + ": " + node);
     }
 
+    private static void addConcreteExperiments(List<Experiment> experiments, ExperimentTemplate template) {
+        template.validateShape();
+        List<int[]> vessels = template.vessels();
+        List<Integer> seeds = template.seeds == null ? defaultSeeds() : template.seeds;
+        int rows = Objects.requireNonNullElse(template.rows, 4);
+
+        for (int[] tuple : vessels) {
+            int cols = template.cols == null ? autoCols(tuple) : template.cols;
+            for (int seed : seeds) {
+                Experiment experiment = template.base.copySettings();
+                if (experiment.batchName == null) {
+                    experiment.batchName = template.batchName;
+                }
+                experiment.setInstanceKey(tuple[0], tuple[1], tuple[2], rows, cols, seed);
+                experiment.validate();
+                experiments.add(experiment);
+            }
+        }
+    }
+
+    private static int autoCols(int[] vesselTuple) {
+        int total = vesselTuple[0] + vesselTuple[1] + vesselTuple[2];
+        if (total % 3 != 0) {
+            throw new IllegalArgumentException("Total vessel count must be divisible by 3 when cols is unspecified");
+        }
+        return total / 3;
+    }
+
+    private static List<int[]> defaultVessels() {
+        return List.of(new int[]{2, 0, 1});
+    }
+
+    private static List<Integer> defaultSeeds() {
+        List<Integer> seeds = new ArrayList<>();
+        for (int seed : IntervalSet.rangeClosed(1, 5)) {
+            seeds.add(seed);
+        }
+        return seeds;
+    }
+
+    private static String configBaseName(String configFile) {
+        String name = new File(configFile).getName();
+        int dot = name.lastIndexOf('.');
+        if (dot > 0) {
+            name = name.substring(0, dot);
+        }
+        return Experiment.sanitizeName(name);
+    }
+
     private static String vesselTupleToString(JsonNode node) {
         if (!node.isArray() || node.size() != 3) {
             throw new IllegalArgumentException("Vessel tuple must be an array with 3 integers: " + node);
@@ -341,285 +401,38 @@ public class Params {
         return String.format("(%d,%d,%d)", node.get(0).asInt(), node.get(1).asInt(), node.get(2).asInt());
     }
 
-    private static Map<String, String> parseArgMap(String[] args) {
-        Map<String, String> argMap = new LinkedHashMap<>();
-        for (String arg : args) {
-            String[] parts = arg.split("=", 2);
-            if (parts.length != 2) {
-                throw new IllegalArgumentException("Invalid argument format: " + arg);
-            }
-            argMap.put(normalizeKey(parts[0]), parts[1]);
-        }
-        return argMap;
-    }
-
-    private static Map<String, String> workerCliOverrides(Map<String, String> cliArgs) {
-        Map<String, String> overrides = new LinkedHashMap<>();
-        for (Map.Entry<String, String> entry : cliArgs.entrySet()) {
-            String key = normalizeKey(entry.getKey());
-            if (!isLauncherOnlyKey(key) && !key.equals("config")) {
-                overrides.put(key, entry.getValue());
-            }
-        }
-        return overrides;
-    }
-
-    private static boolean isLauncherOnlyKey(String key) {
-        return key.equals("processes") || key.equals("heap_mb") || key.equals("xmx_mb") ||
-                key.equals("fail_fast");
-    }
-
-    private static boolean parseOptionalBoolean(String value) {
-        return value != null && Boolean.parseBoolean(value);
-    }
-
-    private static String normalizeKey(String key) {
-        return key.toLowerCase().replace("-", "_");
-    }
-
-    private void applyArgs(Map<String, String> args) {
-        for (Map.Entry<String, String> entry : args.entrySet()) {
-            applyArg(entry.getKey(), entry.getValue());
-        }
-    }
-
-    private void applyArg(String rawKey, String value) {
-        String key = normalizeKey(rawKey);
-
-        switch (key) {
-            case "config" -> this.configFile = value;
-            case "batch_name" -> this.batchName = sanitizeName(value);
-            case "worker" -> this.worker = parseBoolean(value, key);
-            case "parallel" -> this.parallel = parseBoolean(value, key);
-            case "solver" -> this.solver = SolverType.fromName(value);
-            case "small" -> this.small = parseInt(value, key);
-            case "medium" -> this.medium = parseInt(value, key);
-            case "large" -> this.large = parseInt(value, key);
-            case "vessels", "vessel" -> this.vessels = parseVessels(value);
-            case "rows" -> this.rows = parseInt(value, key);
-            case "cols" -> this.cols = parseInt(value, key);
-            case "seed", "seeds" -> this.seeds = parseSeeds(value, key);
-            case "write" -> this.write = parseBoolean(value, key);
-            case "export_lp", "exportlp" -> this.exportLp = parseBoolean(value, key);
-            case "timelimit", "time_limit" -> this.timeLimit = parseInt(value, key);
-            case "threads" -> this.threads = parseInt(value, key);
-            case "processes" -> this.processes = parseInt(value, key);
-            case "heap_mb", "xmx_mb" -> this.heapMb = parseInt(value, key);
-            case "fail_fast" -> this.failFast = parseBoolean(value, key);
-            case "parent_pid" -> this.parentPid = parseLong(value, key);
-            case "work_mem", "work_mem_mb" -> this.workMemMb = parseInt(value, key);
-            case "tree_mem", "tree_memory", "tree_mem_mb" -> this.treeMemMb = parseInt(value, key);
-            case "rss_limit", "rss_limit_mb" -> this.rssLimitMb = parseInt(value, key);
-            case "rss_check_interval", "rss_check_interval_ms" -> this.rssCheckIntervalMs = parseLong(value, key);
-            case "memory_log_interval", "memory_log_interval_ms" -> this.memoryLogIntervalMs = parseLong(value, key);
-            case "node_file" -> this.nodeFile = parseInt(value, key);
-            case "work_dir" -> this.workDir = value;
-            case "mip_display" -> this.mipDisplay = parseInt(value, key);
-            case "mip_emphasis" -> this.mipEmphasis = value.toLowerCase();
-            case "memory_emphasis" -> this.memoryEmphasis = parseBoolean(value, key);
-            default -> throw new IllegalArgumentException("Unknown parameter: " + key);
-        }
-    }
-
-    public void validate() {
-        if ((this.vessels != null && !this.vessels.isEmpty())
-                && (this.small != null || this.medium != null || this.large != null)) {
-            throw new IllegalArgumentException("Cannot specify both 'vessels' and individual vessel counts");
-        }
-
-        if (this.vessels != null && !this.vessels.isEmpty()) {
-            for (int[] tuple : this.vessels) {
-                checkNonNegative(tuple[0], "small");
-                checkNonNegative(tuple[1], "medium");
-                checkNonNegative(tuple[2], "large");
-            }
-        }
-        if (this.small != null || this.medium != null || this.large != null) {
-            Objects.requireNonNull(this.small, "small");
-            Objects.requireNonNull(this.medium, "medium");
-            Objects.requireNonNull(this.large, "large");
-            checkNonNegative(this.small, "small");
-            checkNonNegative(this.medium, "medium");
-            checkNonNegative(this.large, "large");
-        }
-
-        if (this.rows != null)
-            checkNonNegative(this.rows, "rows");
-        if (this.cols != null)
-            checkNonNegative(this.cols, "cols");
-
-        if (this.timeLimit != null)
-            checkRange(this.timeLimit, 1, 86400, "timelimit");
-        if (this.threads != null)
-            checkRange(this.threads, 1, 32, "threads");
-        if (this.processes != null)
-            checkRange(this.processes, 1, 1024, "processes");
-        if (this.heapMb != null)
-            checkRange(this.heapMb, 128, 1024 * 1024, "heap_mb");
-        if (this.workMemMb != null)
-            checkRange(this.workMemMb, 128, 1024 * 1024, "work_mem");
-
-        if (this.treeMemMb != null)
-            checkRange(this.treeMemMb, 128, 1024 * 1024, "tree_mem");
-
-        if (this.rssLimitMb != null)
-            checkRange(this.rssLimitMb, 512, 1024 * 1024, "rss_limit");
-        if (this.rssCheckIntervalMs != null)
-            checkLongRange(this.rssCheckIntervalMs, 100, 86_400_000, "rss_check_interval_ms");
-        if (this.memoryLogIntervalMs != null)
-            checkLongRange(this.memoryLogIntervalMs, 1000, 86_400_000, "memory_log_interval_ms");
-
-        if (this.nodeFile != null)
-            checkRange(this.nodeFile, 0, 3, "node_file");
-    }
-
-    private void validateLauncher() {
-        if (this.processes != null)
-            checkRange(this.processes, 1, 1024, "processes");
-        if (this.heapMb != null)
-            checkRange(this.heapMb, 128, 1024 * 1024, "heap_mb");
-    }
-
-    public void autoFill() {
-        if (this.solver == null)
-            this.solver = SolverType.CPLEX_INTEGRATED_MODEL;
-
-        if (this.seeds == null)
-            this.seeds = IntervalSet.rangeClosed(1, 5);
-
-        if (this.vessels == null || this.vessels.isEmpty()) {
-            this.vessels = new ArrayList<>();
-            if (this.small != null && this.medium != null && this.large != null) {
-                this.vessels.add(new int[]{this.small, this.medium, this.large});
-            } else if (this.small == null && this.medium == null && this.large == null) {
-                this.vessels.add(new int[]{2, 0, 1});
+    private static List<String> splitTopLevelComma(String value) {
+        List<String> values = new ArrayList<>();
+        StringBuilder current = new StringBuilder();
+        int parenDepth = 0;
+        for (int i = 0; i < value.length(); i++) {
+            char c = value.charAt(i);
+            if (c == '(') {
+                parenDepth++;
+                current.append(c);
+            } else if (c == ')') {
+                parenDepth--;
+                current.append(c);
+            } else if (c == ',' && parenDepth == 0) {
+                addSplitValue(values, current);
             } else {
-                throw new IllegalArgumentException("Either all or none of small, medium, and large must be specified");
+                current.append(c);
             }
         }
+        addSplitValue(values, current);
+        return values;
+    }
 
-        this.configs = new ArrayList<>();
-        for (int[] tuple : this.vessels) {
-            int small = tuple[0];
-            int medium = tuple[1];
-            int large = tuple[2];
-
-            int rows = Objects.requireNonNullElse(this.rows, 4);
-
-            int cols;
-            if (this.cols == null) {
-                int total = small + medium + large;
-                if (total % 3 != 0) {
-                    throw new IllegalArgumentException("Total vessel count must be divisible by 3 when cols is unspecified");
-                }
-                cols = total / 3;
-            } else {
-                cols = this.cols;
-            }
-
-            for (int seed : this.seeds)
-                this.configs.add(new VesselConfig(small, medium, large,
-                        rows, cols, seed));
+    private static void addSplitValue(List<String> values, StringBuilder current) {
+        String value = current.toString().trim();
+        if (!value.isEmpty()) {
+            values.add(value);
         }
+        current.setLength(0);
     }
 
-    public List<String> toWorkerArgs() {
-        if (this.configs == null || this.configs.size() != 1) {
-            throw new IllegalStateException("Worker args require exactly one concrete VesselConfig");
-        }
-
-        VesselConfig config = this.configs.get(0);
-        List<String> args = new ArrayList<>();
-        args.add("worker=true");
-        args.add("solver=" + solver.getName());
-        args.add("small=" + config.small);
-        args.add("medium=" + config.medium);
-        args.add("large=" + config.large);
-        args.add("rows=" + config.rows);
-        args.add("cols=" + config.cols);
-        args.add("seed=" + config.seed);
-        args.add("write=" + write);
-        args.add("export_lp=" + exportLp);
-        args.add("memory_emphasis=" + memoryEmphasis);
-
-        addOptionalArg(args, "timelimit", timeLimit);
-        addOptionalArg(args, "threads", threads);
-        addOptionalArg(args, "work_mem_mb", workMemMb);
-        addOptionalArg(args, "tree_mem_mb", treeMemMb);
-        addOptionalArg(args, "rss_limit_mb", rssLimitMb);
-        addOptionalArg(args, "rss_check_interval_ms", rssCheckIntervalMs);
-        addOptionalArg(args, "memory_log_interval_ms", memoryLogIntervalMs);
-        addOptionalArg(args, "node_file", nodeFile);
-        addOptionalArg(args, "work_dir", workDir);
-        addOptionalArg(args, "mip_display", mipDisplay);
-        addOptionalArg(args, "mip_emphasis", mipEmphasis);
-        addOptionalArg(args, "batch_name", batchName);
-        return args;
-    }
-
-    private static void addOptionalArg(List<String> args, String key, Object value) {
-        if (value != null) {
-            args.add(key + "=" + value);
-        }
-    }
-
-    public String briefName() {
-        if (configs == null || configs.isEmpty()) {
-            return solver == null ? "unfilled" : solver.getName();
-        }
-        return configs.get(0).name + "_" + solver.getName();
-    }
-
-    private Params copyRunSettings() {
-        Params copy = new Params();
-        copy.solver = this.solver;
-        copy.write = this.write;
-        copy.exportLp = this.exportLp;
-        copy.timeLimit = this.timeLimit;
-        copy.threads = this.threads;
-        copy.parallel = false;
-        copy.workMemMb = this.workMemMb;
-        copy.treeMemMb = this.treeMemMb;
-        copy.rssLimitMb = this.rssLimitMb;
-        copy.nodeFile = this.nodeFile;
-        copy.mipDisplay = this.mipDisplay;
-        copy.workDir = this.workDir;
-        copy.mipEmphasis = this.mipEmphasis;
-        copy.memoryEmphasis = this.memoryEmphasis;
-        copy.rssCheckIntervalMs = this.rssCheckIntervalMs;
-        copy.memoryLogIntervalMs = this.memoryLogIntervalMs;
-        copy.batchName = this.batchName;
-        return copy;
-    }
-
-    private int parseInt(String value, String paramName) {
-        try {
-            return Integer.parseInt(value);
-        } catch (NumberFormatException e) {
-            throw new IllegalArgumentException("Invalid integer value for " + paramName + ": " + value);
-        }
-    }
-
-    private long parseLong(String value, String paramName) {
-        try {
-            return Long.parseLong(value);
-        } catch (NumberFormatException e) {
-            throw new IllegalArgumentException("Invalid long value for " + paramName + ": " + value);
-        }
-    }
-
-    private boolean parseBoolean(String value, String paramName) {
-        if (value.equalsIgnoreCase("true")) {
-            return true;
-        } else if (value.equalsIgnoreCase("false")) {
-            return false;
-        } else {
-            throw new IllegalArgumentException("Invalid boolean value for " + paramName + ": " + value);
-        }
-    }
-
-    private IntervalSet parseSeeds(String seedsStr, String paramName) {
-        IntervalSet seeds = IntervalSet.empty();
+    private static List<Integer> parseSeeds(String seedsStr, String paramName) {
+        List<Integer> seeds = new ArrayList<>();
         for (String part : seedsStr.split(",")) {
             part = part.trim();
             if (part.isEmpty()) {
@@ -627,23 +440,26 @@ public class Params {
             }
             if (part.contains("-")) {
                 String[] range = part.split("-");
-                int start = Integer.parseInt(range[0]);
-                int end = Integer.parseInt(range[1]);
-                if (start < 0 || end < 0 || start > end)
+                int start = Experiment.parseInt(range[0], paramName);
+                int end = Experiment.parseInt(range[1], paramName);
+                if (start < 0 || end < 0 || start > end) {
                     throw new IllegalArgumentException("Invalid seed range for " + paramName + ": " + part);
-
-                seeds = IntervalSet.concat(seeds, IntervalSet.rangeClosed(start, end));
+                }
+                for (int seed : IntervalSet.rangeClosed(start, end)) {
+                    seeds.add(seed);
+                }
             } else {
-                int seed = Integer.parseInt(part);
-                if (seed < 0)
+                int seed = Experiment.parseInt(part, paramName);
+                if (seed < 0) {
                     throw new IllegalArgumentException("Invalid seed value for " + paramName + ": " + part);
-                seeds = IntervalSet.concat(seeds, IntervalSet.of(seed));
+                }
+                seeds.add(seed);
             }
         }
         return seeds;
     }
 
-    private List<int[]> parseVessels(String value) {
+    private static List<int[]> parseVessels(String value) {
         List<int[]> tuples = new ArrayList<>();
         value = value.replaceAll("\\s+", "");
         String[] tupleStrings = value.split(",(?![^()]*\\))");
@@ -658,28 +474,76 @@ public class Params {
             }
             int[] tuple = new int[3];
             for (int i = 0; i < 3; i++) {
-                tuple[i] = parseInt(parts[i], "vessels");
+                tuple[i] = Experiment.parseInt(parts[i], "vessels");
             }
             tuples.add(tuple);
         }
         return tuples;
     }
 
-    private void checkNonNegative(int value, String name) {
-        if (value < 0) {
-            throw new IllegalArgumentException("Negative value for " + name + ": " + value);
-        }
-    }
-
-    private void checkRange(int value, int min, int max, String name) {
+    private static void checkRange(int value, int min, int max, String name) {
         if (value < min || value > max) {
             throw new IllegalArgumentException("Value for " + name + " out of range [" + min + ", " + max + "]: " + value);
         }
     }
 
-    private void checkLongRange(long value, long min, long max, String name) {
-        if (value < min || value > max) {
-            throw new IllegalArgumentException("Value for " + name + " out of range [" + min + ", " + max + "]: " + value);
+    private static class ExperimentTemplate {
+        final Experiment base = new Experiment();
+        List<int[]> vesselTuples;
+        Integer small;
+        Integer medium;
+        Integer large;
+        Integer rows;
+        Integer cols;
+        List<Integer> seeds;
+        String batchName;
+
+        void applyArgs(Map<String, String> args) {
+            for (Map.Entry<String, String> entry : args.entrySet()) {
+                applyArg(entry.getKey(), entry.getValue());
+            }
+        }
+
+        void applyArg(String rawKey, String value) {
+            String key = Experiment.normalizeKey(rawKey);
+            switch (key) {
+                case "batch_name" -> {
+                    batchName = Experiment.sanitizeName(value);
+                    base.batchName = batchName;
+                }
+                case "vessels", "vessel" -> vesselTuples = parseVessels(value);
+                case "small" -> small = Experiment.parseInt(value, key);
+                case "medium" -> medium = Experiment.parseInt(value, key);
+                case "large" -> large = Experiment.parseInt(value, key);
+                case "rows" -> rows = Experiment.parseInt(value, key);
+                case "cols" -> cols = Experiment.parseInt(value, key);
+                case "seed", "seeds" -> seeds = parseSeeds(value, key);
+                default -> base.applyArg(key, value);
+            }
+            if (base.batchName == null && batchName != null) {
+                base.batchName = batchName;
+            }
+        }
+
+        List<int[]> vessels() {
+            if (vesselTuples != null && !vesselTuples.isEmpty()) {
+                return vesselTuples;
+            }
+            if (small != null || medium != null || large != null) {
+                return List.of(new int[]{small, medium, large});
+            }
+            return defaultVessels();
+        }
+
+        void validateShape() {
+            if (vesselTuples != null && (small != null || medium != null || large != null)) {
+                throw new IllegalArgumentException("Cannot specify both 'vessels' and individual vessel counts");
+            }
+            if (small != null || medium != null || large != null) {
+                Objects.requireNonNull(small, "small");
+                Objects.requireNonNull(medium, "medium");
+                Objects.requireNonNull(large, "large");
+            }
         }
     }
 }
