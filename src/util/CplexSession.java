@@ -13,9 +13,13 @@ import java.io.OutputStream;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 
 public class CplexSession implements AutoCloseable {
     private static final Logger CPLEX_LOGGER = LoggerFactory.getLogger("cplex");
+    private static final long BYTES_PER_MB = 1024L * 1024L;
+    private static final int LOG_PATTERN_OVERHEAD_BYTES = 128;
 
     private final RunContext context;
     private IloCplex.Aborter aborter;
@@ -29,8 +33,9 @@ public class CplexSession implements AutoCloseable {
 
         try {
             this.cplex = new IloCplex();
-            this.cplex.setOut(cplexLogStream(CPLEX_LOGGER, LogLevel.INFO));
-            this.cplex.setWarning(cplexLogStream(CPLEX_LOGGER, LogLevel.WARN));
+            CplexLogLimiter logLimiter = CplexLogLimiter.from(experiment, context);
+            this.cplex.setOut(cplexLogStream(CPLEX_LOGGER, LogLevel.INFO, logLimiter));
+            this.cplex.setWarning(cplexLogStream(CPLEX_LOGGER, LogLevel.WARN, logLimiter));
             this.aborter = new IloCplex.Aborter();
             this.cplex.use(this.aborter);
 
@@ -63,6 +68,10 @@ public class CplexSession implements AutoCloseable {
 
             if (experiment.mipDisplay != null)
                 cplex.setParam(IloCplex.Param.MIP.Display, experiment.mipDisplay);
+            if (experiment.simplexDisplay != null)
+                cplex.setParam(IloCplex.Param.Simplex.Display, experiment.simplexDisplay);
+            if (experiment.barrierDisplay != null)
+                cplex.setParam(IloCplex.Param.Barrier.Display, experiment.barrierDisplay);
 
 
             if (experiment.mipEmphasis != null)
@@ -112,8 +121,8 @@ public class CplexSession implements AutoCloseable {
         cplex.end();
     }
 
-    private static PrintStream cplexLogStream(Logger logger, LogLevel level) {
-        return new PrintStream(new LoggerOutputStream(logger, level), true, StandardCharsets.UTF_8);
+    private static PrintStream cplexLogStream(Logger logger, LogLevel level, CplexLogLimiter limiter) {
+        return new PrintStream(new LoggerOutputStream(logger, level, limiter), true, StandardCharsets.UTF_8);
     }
 
     private enum LogLevel {
@@ -124,12 +133,14 @@ public class CplexSession implements AutoCloseable {
     private static final class LoggerOutputStream extends OutputStream {
         private final Logger logger;
         private final LogLevel level;
+        private final CplexLogLimiter limiter;
         private final Map<String, String> mdcContext;
         private final ByteArrayOutputStream buffer = new ByteArrayOutputStream(256);
 
-        private LoggerOutputStream(Logger logger, LogLevel level) {
+        private LoggerOutputStream(Logger logger, LogLevel level, CplexLogLimiter limiter) {
             this.logger = logger;
             this.level = level;
+            this.limiter = limiter;
             this.mdcContext = MDC.getCopyOfContextMap();
         }
 
@@ -166,6 +177,17 @@ public class CplexSession implements AutoCloseable {
         }
 
         private void log(String line) {
+            if (limiter != null && !limiter.tryReserve(line)) {
+                String notice = limiter.suppressionNotice();
+                if (notice != null) {
+                    logInternal(notice, LogLevel.WARN);
+                }
+                return;
+            }
+            logInternal(line, level);
+        }
+
+        private void logInternal(String line, LogLevel targetLevel) {
             Map<String, String> previous = MDC.getCopyOfContextMap();
             try {
                 if (mdcContext == null) {
@@ -173,7 +195,7 @@ public class CplexSession implements AutoCloseable {
                 } else {
                     MDC.setContextMap(mdcContext);
                 }
-                if (level == LogLevel.WARN) {
+                if (targetLevel == LogLevel.WARN) {
                     logger.warn(line);
                 } else {
                     logger.info(line);
@@ -185,6 +207,56 @@ public class CplexSession implements AutoCloseable {
                     MDC.setContextMap(previous);
                 }
             }
+        }
+    }
+
+    private static final class CplexLogLimiter {
+        private final long limitBytes;
+        private final RunContext context;
+        private final AtomicLong reservedBytes = new AtomicLong(0L);
+        private final AtomicBoolean noticeEmitted = new AtomicBoolean(false);
+
+        private CplexLogLimiter(long limitBytes, RunContext context) {
+            this.limitBytes = limitBytes;
+            this.context = context;
+        }
+
+        private static CplexLogLimiter from(Experiment experiment, RunContext context) {
+            if (context != null) {
+                return new CplexLogLimiter(-1L, context);
+            }
+            if (experiment.cplexLogLimitMb == null) {
+                return null;
+            }
+            return new CplexLogLimiter(experiment.cplexLogLimitMb.longValue() * BYTES_PER_MB, null);
+        }
+
+        private boolean tryReserve(String line) {
+            long estimatedBytes = line.getBytes(StandardCharsets.UTF_8).length + 1L + LOG_PATTERN_OVERHEAD_BYTES;
+            if (context != null) {
+                return context.reserveCplexLogBytes(estimatedBytes);
+            }
+            while (true) {
+                long current = reservedBytes.get();
+                if (current + estimatedBytes > limitBytes) {
+                    return false;
+                }
+                if (reservedBytes.compareAndSet(current, current + estimatedBytes)) {
+                    return true;
+                }
+            }
+        }
+
+        private String suppressionNotice() {
+            if (context != null) {
+                return context.cplexLogSuppressionNotice();
+            }
+            if (!noticeEmitted.compareAndSet(false, true)) {
+                return null;
+            }
+            long limitMb = Math.max(1L, limitBytes / BYTES_PER_MB);
+            return "CPLEX log suppressed after reaching configured cplex_log_limit="
+                    + limitMb + " MB. Solver continues; non-CPLEX logs are still written.";
         }
     }
 }

@@ -21,8 +21,10 @@ import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
 
 public class RunContext implements AutoCloseable {
+    public static final String STOP_REQUESTED_FILE = "STOP_REQUESTED";
     private static final long DEFAULT_RSS_CHECK_INTERVAL_MS = 5_000L;
     private static final long DEFAULT_MEMORY_LOG_INTERVAL_MS = 30_000L;
     private static final long BYTES_PER_MB = 1024L * 1024L;
@@ -46,10 +48,15 @@ public class RunContext implements AutoCloseable {
     private final long checkIntervalMillis;
     private final long memoryLogIntervalMillis;
     private long nextMemoryLogMillis;
+    private final Path manualStopFile;
+    private final Long parentPid;
+    private final Long cplexLogLimitBytes;
 
 
     private final AtomicBoolean finished = new AtomicBoolean(false);
     private final AtomicBoolean stopRequested = new AtomicBoolean(false);
+    private final AtomicLong cplexLogReservedBytes = new AtomicLong(0L);
+    private final AtomicBoolean cplexLogNoticeEmitted = new AtomicBoolean(false);
 
     private volatile StopReason stopReason = StopReason.NONE;
 
@@ -69,13 +76,22 @@ public class RunContext implements AutoCloseable {
         this.memoryLogIntervalMillis = experiment.memoryLogIntervalMs != null ? experiment.memoryLogIntervalMs :
                 (experiment.rssLimitMb == null || experiment.rssLimitMb <= 0 ? 0L : DEFAULT_MEMORY_LOG_INTERVAL_MS);
         this.nextMemoryLogMillis = this.startTimeMillis;
+        this.manualStopFile = experiment.runOutputDir == null || experiment.runOutputDir.isBlank()
+                ? null
+                : Path.of(experiment.runOutputDir, STOP_REQUESTED_FILE);
+        this.parentPid = experiment.parentPid;
+        this.cplexLogLimitBytes = experiment.cplexLogLimitMb == null
+                ? null
+                : experiment.cplexLogLimitMb.longValue() * BYTES_PER_MB;
 
     }
 
     public void startMonitor() {
         if ((experiment.rssLimitMb == null || experiment.rssLimitMb <= 0)
                 && deadlineMillis == null
-                && memoryLogIntervalMillis <= 0) {
+                && memoryLogIntervalMillis <= 0
+                && manualStopFile == null
+                && parentPid == null) {
             return;
         }
 
@@ -89,6 +105,14 @@ public class RunContext implements AutoCloseable {
                 if (memoryLogIntervalMillis > 0 && now >= nextMemoryLogMillis) {
                     logInfo(memorySummary());
                     nextMemoryLogMillis = now + memoryLogIntervalMillis;
+                }
+
+                if (manualStopFile != null && Files.exists(manualStopFile)) {
+                    requestStop(StopReason.MANUAL_STOP, "Manual stop file detected: " + manualStopFile);
+                }
+
+                if (parentPid != null && parentPid > 0 && !isProcessAlive(parentPid)) {
+                    requestStop(StopReason.MANUAL_STOP, "Parent launcher process " + parentPid + " is gone.");
                 }
 
                 if (rssLimitMb != null && rssLimitMb > 0) {
@@ -171,6 +195,10 @@ public class RunContext implements AutoCloseable {
 
     public boolean hasTimeLeft() {
         return deadlineMillis == null || remainingSeconds() > 0.0;
+    }
+
+    private static boolean isProcessAlive(long pid) {
+        return ProcessHandle.of(pid).map(ProcessHandle::isAlive).orElse(false);
     }
 
 
@@ -315,13 +343,38 @@ public class RunContext implements AutoCloseable {
 
     public String memoryConfigSummary() {
         return String.format(
-                "memory: rss_limit=%s, work_mem=%s, tree_mem=%s, heap_max=%d MB, memory_log_interval=%s",
+                "memory: rss_limit=%s, work_mem=%s, tree_mem=%s, heap_max=%d MB, memory_log_interval=%s, cplex_log_limit=%s",
                 memoryConfigMb(experiment.rssLimitMb, "none"),
                 memoryConfigMb(experiment.workMemMb, "default"),
                 memoryConfigMb(experiment.treeMemMb, "default"),
                 getMaxHeapMb(),
-                memoryLogIntervalMillis <= 0 ? "disabled" : memoryLogIntervalMillis + " ms"
+                memoryLogIntervalMillis <= 0 ? "disabled" : memoryLogIntervalMillis + " ms",
+                memoryConfigMb(experiment.cplexLogLimitMb, "none")
         );
+    }
+
+    public boolean reserveCplexLogBytes(long bytes) {
+        if (cplexLogLimitBytes == null) {
+            return true;
+        }
+        while (true) {
+            long current = cplexLogReservedBytes.get();
+            if (current + bytes > cplexLogLimitBytes) {
+                return false;
+            }
+            if (cplexLogReservedBytes.compareAndSet(current, current + bytes)) {
+                return true;
+            }
+        }
+    }
+
+    public String cplexLogSuppressionNotice() {
+        if (cplexLogLimitBytes == null || !cplexLogNoticeEmitted.compareAndSet(false, true)) {
+            return null;
+        }
+        long limitMb = Math.max(1L, cplexLogLimitBytes / BYTES_PER_MB);
+        return "CPLEX log suppressed after reaching configured cplex_log_limit="
+                + limitMb + " MB. Solver continues; non-CPLEX logs are still written.";
     }
 
     private static String memoryConfigMb(Integer valueMb, String defaultValue) {

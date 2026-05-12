@@ -29,11 +29,17 @@ public class Params {
                     "  export_lp   - Export CPLEX original model LP [true|false] (default: false)\n" +
                     "  timelimit   - Solver time limit in seconds (default: no limit)\n" +
                     "  cplex_threads - CPLEX thread count (default: no limit)\n" +
-                    "  parallel_configs - concurrently running config experiments\n" +
-                    "  heap        - launcher child JVM -Xmx value, size format like 512m or 8g\n" +
+                    "  parallel_configs - max concurrently running config experiments\n" +
+                    "  thread_budget - max concurrent CPLEX threads across child JVMs\n" +
+                    "  memory_budget - max concurrent memory budget across child JVMs\n" +
+                    "  shutdown_grace_period_seconds - seconds to wait after graceful shutdown request (default: 120)\n" +
+                    "  heap        - default child JVM -Xmx value, size format like 512m or 8g\n" +
                     "  rss_limit   - RSS stop limit, size format like 4096m or 4g\n" +
                     "  work_mem    - CPLEX work memory, size format like 2048m or 2g\n" +
-                    "  tree_mem    - CPLEX MIP tree memory, size format like 4096m or 4g\n\n" +
+                    "  tree_mem    - CPLEX MIP tree memory, size format like 4096m or 4g\n" +
+                    "  mip_display - CPLEX MIP display level [0..5]\n" +
+                    "  simplex_display - CPLEX simplex display level [0..2]\n" +
+                    "  barrier_display - CPLEX barrier display level [0..2]\n\n" +
                     "Examples:\n" +
                     "  java main.Main solver=sequential small=3 medium=0 large=2 timelimit=1800\n" +
                     "  java main.Main seeds=1,3-5 write=true\n" +
@@ -43,6 +49,9 @@ public class Params {
     public String batchName;
     public Integer parallelConfigs;
     public Integer heapMb;
+    public Integer threadBudget;
+    public Integer memoryBudgetMb;
+    public Integer shutdownGracePeriodSeconds = 120;
     public List<Experiment> experiments;
 
     public static Params parse(String[] args) {
@@ -157,8 +166,15 @@ public class Params {
             switch (key) {
                 case "config" -> this.configFile = value;
                 case "batch_name" -> this.batchName = Experiment.sanitizeName(value);
-                case "parallel_configs", "parallel_runs" -> this.parallelConfigs = Experiment.parseInt(value, key);
+                case "parallel_configs", "parallel_runs", "parallel_configs_budget" ->
+                        this.parallelConfigs = Experiment.parseInt(value, key);
                 case "heap", "xmx", "heap_mb", "xmx_mb" -> this.heapMb = Experiment.parseMemorySizeMb(value, key);
+                case "thread_budget", "threads_budget", "total_thread", "total_threads" ->
+                        this.threadBudget = Experiment.parseInt(value, key);
+                case "memory_budget", "memory_budget_mb", "total_memory", "total_memory_mb" ->
+                        this.memoryBudgetMb = Experiment.parseMemorySizeMb(value, key);
+                case "shutdown_grace_period_seconds", "shutdown_grace_seconds" ->
+                        this.shutdownGracePeriodSeconds = Experiment.parseInt(value, key);
                 default -> throw new IllegalArgumentException("Unknown launcher parameter: " + key);
             }
         }
@@ -170,6 +186,15 @@ public class Params {
         }
         if (heapMb != null) {
             checkRange(heapMb, 128, 1024 * 1024, "heap");
+        }
+        if (threadBudget != null) {
+            checkRange(threadBudget, 1, 1024, "thread_budget");
+        }
+        if (memoryBudgetMb != null) {
+            checkRange(memoryBudgetMb, 512, 1024 * 1024, "memory_budget");
+        }
+        if (shutdownGracePeriodSeconds != null) {
+            checkRange(shutdownGracePeriodSeconds, 1, 86400, "shutdown_grace_period_seconds");
         }
     }
 
@@ -197,6 +222,12 @@ public class Params {
 
     private static boolean isLauncherOnlyKey(String key) {
         return key.equals("parallel_configs") || key.equals("parallel_runs") ||
+                key.equals("parallel_configs_budget") ||
+                key.equals("thread_budget") || key.equals("threads_budget") ||
+                key.equals("total_thread") || key.equals("total_threads") ||
+                key.equals("memory_budget") || key.equals("memory_budget_mb") ||
+                key.equals("total_memory") || key.equals("total_memory_mb") ||
+                key.equals("shutdown_grace_period_seconds") || key.equals("shutdown_grace_seconds") ||
                 key.equals("heap") || key.equals("xmx") ||
                 key.equals("heap_mb") || key.equals("xmx_mb");
     }

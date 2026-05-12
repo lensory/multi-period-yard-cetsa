@@ -1,5 +1,6 @@
 ### IntelliJ IDEA ###
 out/
+target/
 !**/src/main/**/out/
 !**/src/test/**/out/
 
@@ -35,3 +36,4 @@ checker_small.log
 
 linux/
 output/
+.venv/

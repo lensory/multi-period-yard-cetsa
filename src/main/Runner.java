@@ -367,33 +367,7 @@ public class Runner {
         return solve(instance, experiment, context);
     }
 
-    private static void startParentWatcher(Long parentPid) {
-        if (parentPid == null || parentPid <= 0) {
-            return;
-        }
-        Thread watcher = new Thread(() -> {
-            ProcessHandle parent = ProcessHandle.of(parentPid).orElse(null);
-            if (parent == null) {
-                return;
-            }
-            while (true) {
-                if (!parent.isAlive()) {
-                    LOGGER.error("Parent launcher process {} is gone. Exiting worker.", parentPid);
-                    System.exit(130);
-                }
-                try {
-                    Thread.sleep(1000);
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                    return;
-                }
-            }
-        }, "apjor-parent-watcher");
-        watcher.setDaemon(true);
-        watcher.start();
-    }
-
-    private static File runOutputDir(Experiment experiment, LocalDateTime timestamp) {
+    static File runOutputDir(Experiment experiment, LocalDateTime timestamp) {
         String batchName = experiment.batchName == null || experiment.batchName.isBlank()
                 ? "cli"
                 : Experiment.sanitizeName(experiment.batchName);
@@ -426,7 +400,9 @@ public class Runner {
     public static boolean runExperiment(Experiment experiment) {
         LocalDateTime timestamp = LocalDateTime.now();
 
-        File runDir = runOutputDir(experiment, timestamp);
+        File runDir = experiment.runOutputDir == null || experiment.runOutputDir.isBlank()
+                ? runOutputDir(experiment, timestamp)
+                : new File(experiment.runOutputDir);
         if (!runDir.exists() && !runDir.mkdirs()) {
             throw new RuntimeException("Cannot create experiment output directory: " + runDir);
         }
@@ -513,8 +489,6 @@ public class Runner {
 //        timelimit=3600
 //        cplex_threads=4
         Map<String, String> argMap = Experiment.parseArgMap(args);
-        Long parentPid = Experiment.parentPid(argMap);
-        startParentWatcher(parentPid);
         Experiment experiment = Experiment.parseWorkerArgs(argMap);
         boolean success = runExperiment(experiment);
         if (!success) {

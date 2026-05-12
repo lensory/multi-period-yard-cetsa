@@ -14,14 +14,21 @@ public class Experiment {
     public Integer workMemMb;
     public Integer treeMemMb;
     public Integer rssLimitMb;
+    public Integer heapMb;
+    public Integer memoryBudgetMb;
     public Integer nodeFile;
     public Integer mipDisplay;
+    public Integer simplexDisplay;
+    public Integer barrierDisplay;
+    public Integer cplexLogLimitMb;
     public String workDir;
     public String mipEmphasis;
     public boolean memoryEmphasis;
     public Long rssCheckIntervalMs;
     public Long memoryLogIntervalMs;
     public String batchName;
+    public String runOutputDir;
+    public Long parentPid;
 
     public int small;
     public int medium;
@@ -43,11 +50,6 @@ public class Experiment {
         experiment.fillConcreteDefaults();
         experiment.validate();
         return experiment;
-    }
-
-    static Long parentPid(Map<String, String> args) {
-        String value = args.get("parent_pid");
-        return value == null ? null : parseLong(value, "parent_pid");
     }
 
     static Map<String, String> parseArgMap(String[] args) {
@@ -76,8 +78,9 @@ public class Experiment {
         String key = normalizeKey(rawKey);
 
         switch (key) {
-            case "worker", "parent_pid" -> {
+            case "worker" -> {
             }
+            case "parent_pid" -> this.parentPid = parseLong(value, key);
             case "batch_name" -> this.batchName = sanitizeName(value);
             case "solver" -> this.solver = SolverType.fromName(value);
             case "small" -> this.inputSmall = parseInt(value, key);
@@ -93,13 +96,20 @@ public class Experiment {
             case "work_mem", "work_mem_mb" -> this.workMemMb = parseMemorySizeMb(value, key);
             case "tree_mem", "tree_memory", "tree_mem_mb" -> this.treeMemMb = parseMemorySizeMb(value, key);
             case "rss_limit", "rss_limit_mb" -> this.rssLimitMb = parseMemorySizeMb(value, key);
+            case "heap", "xmx", "heap_mb", "xmx_mb" -> this.heapMb = parseMemorySizeMb(value, key);
+            case "memory_budget", "memory_budget_mb" -> this.memoryBudgetMb = parseMemorySizeMb(value, key);
             case "rss_check_interval", "rss_check_interval_ms" -> this.rssCheckIntervalMs = parseLong(value, key);
             case "memory_log_interval", "memory_log_interval_ms" -> this.memoryLogIntervalMs = parseLong(value, key);
             case "node_file" -> this.nodeFile = parseInt(value, key);
             case "work_dir" -> this.workDir = value;
             case "mip_display" -> this.mipDisplay = parseInt(value, key);
+            case "simplex_display" -> this.simplexDisplay = parseInt(value, key);
+            case "barrier_display" -> this.barrierDisplay = parseInt(value, key);
+            case "cplex_log_limit", "cplex_log_limit_mb", "cplex_log_max", "cplex_log_max_mb" ->
+                    this.cplexLogLimitMb = parseMemorySizeMb(value, key);
             case "mip_emphasis" -> this.mipEmphasis = value.toLowerCase();
             case "memory_emphasis" -> this.memoryEmphasis = parseBoolean(value, key);
+            case "run_output_dir" -> this.runOutputDir = value;
             default -> throw new IllegalArgumentException("Unknown parameter: " + key);
         }
     }
@@ -124,14 +134,21 @@ public class Experiment {
         copy.workMemMb = this.workMemMb;
         copy.treeMemMb = this.treeMemMb;
         copy.rssLimitMb = this.rssLimitMb;
+        copy.heapMb = this.heapMb;
+        copy.memoryBudgetMb = this.memoryBudgetMb;
         copy.nodeFile = this.nodeFile;
         copy.mipDisplay = this.mipDisplay;
+        copy.simplexDisplay = this.simplexDisplay;
+        copy.barrierDisplay = this.barrierDisplay;
+        copy.cplexLogLimitMb = this.cplexLogLimitMb;
         copy.workDir = this.workDir;
         copy.mipEmphasis = this.mipEmphasis;
         copy.memoryEmphasis = this.memoryEmphasis;
         copy.rssCheckIntervalMs = this.rssCheckIntervalMs;
         copy.memoryLogIntervalMs = this.memoryLogIntervalMs;
         copy.batchName = this.batchName;
+        copy.runOutputDir = this.runOutputDir;
+        copy.parentPid = this.parentPid;
         return copy;
     }
 
@@ -175,6 +192,12 @@ public class Experiment {
         if (rssLimitMb != null) {
             checkRange(rssLimitMb, 512, 1024 * 1024, "rss_limit");
         }
+        if (heapMb != null) {
+            checkRange(heapMb, 128, 1024 * 1024, "heap");
+        }
+        if (memoryBudgetMb != null) {
+            checkRange(memoryBudgetMb, 512, 1024 * 1024, "memory_budget");
+        }
         if (rssCheckIntervalMs != null) {
             checkLongRange(rssCheckIntervalMs, 100, 86_400_000, "rss_check_interval_ms");
         }
@@ -183,6 +206,18 @@ public class Experiment {
         }
         if (nodeFile != null) {
             checkRange(nodeFile, 0, 3, "node_file");
+        }
+        if (mipDisplay != null) {
+            checkRange(mipDisplay, 0, 5, "mip_display");
+        }
+        if (simplexDisplay != null) {
+            checkRange(simplexDisplay, 0, 2, "simplex_display");
+        }
+        if (barrierDisplay != null) {
+            checkRange(barrierDisplay, 0, 2, "barrier_display");
+        }
+        if (cplexLogLimitMb != null) {
+            checkRange(cplexLogLimitMb, 1, 1024 * 1024, "cplex_log_limit");
         }
     }
 
@@ -219,8 +254,12 @@ public class Experiment {
         addOptionalArg(args, "node_file", nodeFile);
         addOptionalArg(args, "work_dir", workDir);
         addOptionalArg(args, "mip_display", mipDisplay);
+        addOptionalArg(args, "simplex_display", simplexDisplay);
+        addOptionalArg(args, "barrier_display", barrierDisplay);
+        addOptionalMemoryArg(args, "cplex_log_limit", cplexLogLimitMb);
         addOptionalArg(args, "mip_emphasis", mipEmphasis);
         addOptionalArg(args, "batch_name", batchName);
+        addOptionalArg(args, "run_output_dir", runOutputDir);
         return args;
     }
 

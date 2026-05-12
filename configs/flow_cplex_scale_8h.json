@@ -1,0 +1,90 @@
+{
+  "defaults": {
+    "solver"             : "flow_cplex",
+    "write"              : true,
+    "export_lp"          : false,
+    "timelimit"          : 28800,
+    "cplex_threads"      : 4,
+    "node_file"          : 1,
+    "heap"               : "4g",
+    "rss_limit"          : "12g",
+    "work_mem"           : "2g",
+    "tree_mem"           : "8g",
+    "memory_emphasis"    : false,
+    "mip_display"        : 2,
+    "cplex_log_limit": "1g",
+    "memory_log_interval": 30000
+  },
+  "launcher": {"parallel_configs": 16, "thread_budget": 64, "memory_budget": "288g"},
+  "runs"    : [
+    {
+      "vessels"  : [ [2, 0, 1], [4, 0, 2] ],
+      "rows"     : 6,
+      "seeds"    : "1-5",
+      "heap"     : "4g",
+      "rss_limit": "8g",
+      "work_mem" : "2g",
+      "tree_mem" : "8g"
+    },
+    {
+      "vessels"  : [ [6, 0, 3], [8, 0, 4], [10, 0, 5], [4, 1, 1] ],
+      "rows"     : 6,
+      "seeds"    : "1-5",
+      "heap"     : "8g",
+      "rss_limit": "16g",
+      "work_mem" : "4g",
+      "tree_mem" : "32g"
+    },
+    {
+      "vessels"  : [ [12, 0, 6], [14, 0, 7], [8, 2, 2] ],
+      "rows"     : 6,
+      "seeds"    : "1-5",
+      "heap"     : "12g",
+      "rss_limit": "32g",
+      "work_mem" : "8g",
+      "tree_mem" : "48g"
+    },
+    {
+      "vessels": [ [16, 0, 8], [18, 0, 9] ],
+      "rows"     : 6,
+      "seeds"    : "1-5",
+      "heap"     : "16g",
+      "rss_limit": "48g",
+      "work_mem" : "8g",
+      "tree_mem" : "64g"
+    },
+    {
+      "vessels"  : [ [20, 0, 10] ],
+      "rows"     : 6,
+      "seeds"    : "1-5",
+      "heap"     : "16g",
+      "rss_limit": "48g",
+      "work_mem" : "8g",
+      "tree_mem" : "64g",
+      "mip_display": 4,
+      "simplex_display": 2,
+      "barrier_display": 2
+    },
+    {
+      "vessels"  : [ [12, 3, 3], [16, 4, 4] ],
+      "rows"     : 6,
+      "seeds"    : "1-5",
+      "heap"     : "32g",
+      "rss_limit": "96g",
+      "work_mem" : "8g",
+      "tree_mem" : "128g"
+    },
+    {
+      "vessels"        : [20, 5, 5],
+      "rows"           : 6,
+      "seeds"          : "1-5",
+      "heap"           : "48g",
+      "rss_limit"      : "144g",
+      "work_mem"       : "8g",
+      "tree_mem"       : "144g",
+      "mip_display"    : 4,
+      "simplex_display": 2,
+      "barrier_display": 2
+    }
+  ]
+}

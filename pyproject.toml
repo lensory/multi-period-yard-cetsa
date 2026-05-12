@@ -1,0 +1,16 @@
+[project]
+name = "apjor-yard-analysis"
+version = "0.1.0"
+description = "Analysis utilities for APJOR yard experiment outputs."
+requires-python = ">=3.11"
+dependencies = [
+    "matplotlib>=3.10",
+    "numpy>=2.2",
+    "openpyxl>=3.1",
+    "pandas>=2.2",
+    "seaborn>=0.13",
+    "tqdm>=4.67",
+]
+
+[tool.uv]
+package = false

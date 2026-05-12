@@ -14,19 +14,36 @@ Code for container terminal yard template planning and loading/unloading schedul
 - `linux/` legacy batch logs and statistics
 
 **Dependencies**
-- JDK 17+ (uses `Stream.toList`, etc.)
-- IBM ILOG CPLEX (`cplex.jar`, `concert.jar`, etc. must be on the classpath)
-- Bundled libs: Jackson + Commons CSV under `lib/`
+- JDK 24 for project compilation. Maven can still be launched by the system JDK if `~/.m2/toolchains.xml` points to JDK 24.
+- IBM ILOG CPLEX Java API installed in the local Maven repository.
+- Maven dependencies: Jackson, SLF4J, Logback, and CPLEX.
+
+Local CPLEX coordinates currently used by `pom.xml`:
+
+```xml
+<dependency>
+  <groupId>com.ibm.ilog</groupId>
+  <artifactId>cplex</artifactId>
+  <version>12.10</version>
+</dependency>
+```
+
+CPLEX 22.1.2 is also available locally and can be selected by changing `cplex.version` in `pom.xml`.
 
 **Run**
-- Recommended: run `main.Main` in your IDE with `lib/*.jar` and CPLEX jars on the classpath
-- Command-line example (adjust CPLEX path to your installation)
+- Compile:
 
 ```bash
-javac -cp "lib/*;path/to/cplex/*" -d out $(git ls-files "src/**/*.java")
-java -cp "out;lib/*;path/to/cplex/*" main.Main 
-parallel_configs=2 solver=local_refinement vessel=(2,0,1) rows=6 seed=1-5 write=false timelimit=3600 cplex_threads=4
+mvn compile
 ```
+
+- Run from Maven:
+
+```bash
+mvn exec:java -Dexec.args="parallel_configs=2 solver=local_refinement vessel=(2,0,1) rows=6 seed=1-5 write=false timelimit=3600 cplex_threads=4"
+```
+
+For CPLEX runs, the native library path must still be available at runtime, for example by keeping the CPLEX `bin/x64_win64` directory on `PATH`.
 
 **Common Parameters (`main.Params`)**
 - `solver`: solver type, supports `cplex`, `flow_cplex`, `sequential`, `decomposed`, `local_refinement`, etc.
@@ -38,6 +55,7 @@ parallel_configs=2 solver=local_refinement vessel=(2,0,1) rows=6 seed=1-5 write=
 - `cplex_threads`: CPLEX thread count
 - `write`: write solutions (`true/false`)
 - `parallel_configs`: number of concurrently running config experiments
+- `shutdown_grace_period_seconds`: seconds to wait for worker JVMs to stop gracefully after launcher interrupt before force-kill (default `120`)
 
 **Tools**
 - `main.InstanceGenerator`: generate instance JSON

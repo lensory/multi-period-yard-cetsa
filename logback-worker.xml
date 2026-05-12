@@ -1,12 +1,5 @@
 <configuration>
-    <!-- Console: colorful and compact -->
-    <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
-        <encoder>
-            <pattern>%d{HH:mm:ss.SSS} %highlight(%-5level) [%thread] %cyan(%-45logger) %msg%n</pattern>
-        </encoder>
-    </appender>
-
-    <!-- File: one run log per MDC runOutputDir -->
+    <!-- File: one run log per MDC runOutputDir. Worker stdout is reserved for direct System.out fallback. -->
     <appender name="RUN_FILE" class="ch.qos.logback.classic.sift.SiftingAppender">
         <discriminator>
             <key>runOutputDir</key>
@@ -31,12 +24,7 @@
     <logger name="ilog" level="WARN"/>
     <logger name="org" level="WARN"/>
 
-    <logger name="main.Main" level="INFO" additivity="false">
-        <appender-ref ref="CONSOLE"/>
-    </logger>
-
     <root level="INFO">
-        <appender-ref ref="CONSOLE"/>
         <appender-ref ref="RUN_FILE"/>
     </root>
 </configuration>

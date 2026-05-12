@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <groupId>io.github.apjor</groupId>
+  <artifactId>apjor-yard</artifactId>
+  <version>1.0.0-SNAPSHOT</version>
+  <name>APJOR Yard</name>
+
+  <properties>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <maven.compiler.release>21</maven.compiler.release>
+    <jackson.version>2.19.0</jackson.version>
+    <slf4j.version>2.0.17</slf4j.version>
+    <logback.version>1.5.32</logback.version>
+    <cplex.version>12.10</cplex.version>
+    <cplex.native.path>C:\Program Files\IBM\ILOG\CPLEX_Studio1210\cplex\bin\x64_win64</cplex.native.path>
+    <project.java.executable>${user.home}\.jdks\ms-21.0.8\bin\java.exe</project.java.executable>
+    <main.class>main.Main</main.class>
+    <default.app.args>config=configs/small_batch.json timelimit=60 seeds=1</default.app.args>
+    <app.args>${default.app.args}</app.args>
+  </properties>
+
+  <dependencies>
+    <dependency>
+      <groupId>com.fasterxml.jackson.core</groupId>
+      <artifactId>jackson-databind</artifactId>
+      <version>${jackson.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>org.slf4j</groupId>
+      <artifactId>slf4j-api</artifactId>
+      <version>${slf4j.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>ch.qos.logback</groupId>
+      <artifactId>logback-classic</artifactId>
+      <version>${logback.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>com.ibm.ilog</groupId>
+      <artifactId>cplex</artifactId>
+      <version>${cplex.version}</version>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <sourceDirectory>src</sourceDirectory>
+    <resources>
+      <resource>
+        <directory>.</directory>
+        <includes>
+          <include>logback.xml</include>
+          <include>logback-worker.xml</include>
+          <include>configs/**</include>
+        </includes>
+      </resource>
+    </resources>
+    <plugins>
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-compiler-plugin</artifactId>
+        <version>3.14.0</version>
+        <configuration>
+          <release>${maven.compiler.release}</release>
+          <jdkToolchain>
+            <version>21</version>
+          </jdkToolchain>
+        </configuration>
+      </plugin>
+      <plugin>
+        <groupId>org.codehaus.mojo</groupId>
+        <artifactId>exec-maven-plugin</artifactId>
+        <version>3.5.0</version>
+        <configuration>
+          <executable>${project.java.executable}</executable>
+          <classpathScope>runtime</classpathScope>
+          <commandlineArgs>--enable-native-access=ALL-UNNAMED "-Djava.library.path=${cplex.native.path}" -cp %classpath ${main.class} ${app.args}</commandlineArgs>
+        </configuration>
+      </plugin>
+    </plugins>
+  </build>
+</project>
