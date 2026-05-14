@@ -27,6 +27,7 @@ public class Params {
                     "  seeds       - Random seed range (e.g. 1-5,7,9-11)\n" +
                     "  write       - Enable solution output [true|false] (default: false)\n" +
                     "  export_lp   - Export CPLEX original model LP [true|false] (default: false)\n" +
+                    "  export_lp_only - Export flow-based CPLEX LP and skip solve [true|false] (default: false)\n" +
                     "  timelimit   - Solver time limit in seconds (default: no limit)\n" +
                     "  cplex_threads - CPLEX thread count (default: no limit)\n" +
                     "  parallel_configs - max concurrently running config experiments\n" +

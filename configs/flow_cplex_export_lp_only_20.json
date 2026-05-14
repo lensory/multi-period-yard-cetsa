@@ -1,0 +1,35 @@
+{
+  "defaults": {
+    "solver"             : "flow_cplex",
+    "write"              : false,
+    "export_lp_only"     : true,
+    "cplex_threads"      : 1,
+    "memory_emphasis"    : false,
+    "mip_display"        : 0,
+    "simplex_display"    : 0,
+    "barrier_display"    : 0,
+    "cplex_log_limit"    : "128m",
+    "memory_log_interval": 30000
+  },
+  "launcher": {"parallel_configs": 1, "thread_budget": 1, "memory_budget": "160g"},
+  "runs"    : [
+    {
+      "vessels"  : [20, 5, 5],
+      "rows"     : 6,
+      "seeds"    : "1-5",
+      "heap"     : "48g",
+      "rss_limit": "144g",
+      "work_mem" : "8g",
+      "tree_mem" : "144g"
+    },
+    {
+      "vessels"  : [20, 0, 10],
+      "rows"     : 6,
+      "seeds"    : "1-5",
+      "heap"     : "16g",
+      "rss_limit": "48g",
+      "work_mem" : "8g",
+      "tree_mem" : "64g"
+    }
+  ]
+}

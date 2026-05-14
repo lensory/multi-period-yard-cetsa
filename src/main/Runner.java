@@ -100,10 +100,16 @@ public class Runner {
             }
 
             FlowBasedCplexOriginalModel model = FlowBasedCplexOriginalModel.buildIntegratedModel(
-                    instance, cplex, experiment.exportLp ? lpFileName : null);
+                    instance, cplex, experiment.exportLp || experiment.exportLpOnly ? lpFileName : null);
             model.varLoadOverload.setUB(0);
             model.varUnloadOverload.setUB(0);
             model.exportModelIfRequested();
+
+            if (experiment.exportLpOnly) {
+                LOGGER.info("Exported flow-based CPLEX LP only; skip solve because export_lp_only=true.");
+                return null;
+            }
+
             if (experiment.timeLimit != null)
                 cplex.setParam(IloCplex.IntParam.TimeLimit, experiment.timeLimit);
             if (experiment.cplexThreads != null)
@@ -354,12 +360,20 @@ public class Runner {
             case LOCAL_REFINEMENT_SEARCH -> solveLocalRefinementSearch(instance, experiment);
         };
 
-        if (solution == null)
-            LOGGER.info("No solution found.");
+        if (solution == null) {
+            if (isFlowBasedExportLpOnly(experiment))
+                LOGGER.info("No solution requested because export_lp_only=true.");
+            else
+                LOGGER.info("No solution found.");
+        }
         else {
             LOGGER.info("TemporarySolution found: " + solution.briefObjectives());
         }
         return solution;
+    }
+
+    private static boolean isFlowBasedExportLpOnly(Experiment experiment) {
+        return experiment.exportLpOnly && experiment.solver == SolverType.FLOW_BASED_CPLEX_INTEGRATED_MODEL;
     }
 
     public static Solution solve(String filename, Experiment experiment, RunContext context) {
@@ -436,7 +450,10 @@ public class Runner {
                         solution.write(runDir.getPath());
                     }
                 }
-                String result = formatSummaryLine(
+                String result = isFlowBasedExportLpOnly(experiment)
+                        ? formatExportOnlySummaryLine(experiment.small, experiment.medium, experiment.large,
+                        experiment.rows, experiment.cols, experiment.seed)
+                        : formatSummaryLine(
                         experiment.small, experiment.medium, experiment.large,
                         experiment.rows, experiment.cols, experiment.seed, solution
                 );
@@ -475,8 +492,15 @@ public class Runner {
                     solution.briefObjectives(), solution.getRunningTime());
         else
             return String.format("Vessels=(%d, %d, %d), Yard=(%d, %d), Seed=%d: " +
-                            "Failed%n",
+                    "Failed%n",
                     small, medium, large, rows, cols, seed);
+    }
+
+    public static String formatExportOnlySummaryLine(int small, int medium, int large,
+                                                     int rows, int cols, int seed) {
+        return String.format("Vessels=(%d, %d, %d), Yard=(%d, %d), Seed=%d: " +
+                        "LP exported, solve skipped%n",
+                small, medium, large, rows, cols, seed);
     }
 
 

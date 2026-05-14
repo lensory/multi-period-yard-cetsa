@@ -9,6 +9,7 @@ public class Experiment {
     public SolverType solver;
     public boolean write;
     public boolean exportLp;
+    public boolean exportLpOnly;
     public Integer timeLimit;
     public Integer cplexThreads;
     public Integer workMemMb;
@@ -91,6 +92,7 @@ public class Experiment {
             case "seed", "seeds" -> this.inputSeed = parseInt(value, key);
             case "write" -> this.write = parseBoolean(value, key);
             case "export_lp", "exportlp" -> this.exportLp = parseBoolean(value, key);
+            case "export_lp_only", "exportlponly" -> this.exportLpOnly = parseBoolean(value, key);
             case "timelimit", "time_limit" -> this.timeLimit = parseInt(value, key);
             case "cplex_threads" -> this.cplexThreads = parseInt(value, key);
             case "work_mem", "work_mem_mb" -> this.workMemMb = parseMemorySizeMb(value, key);
@@ -129,6 +131,7 @@ public class Experiment {
         copy.solver = this.solver;
         copy.write = this.write;
         copy.exportLp = this.exportLp;
+        copy.exportLpOnly = this.exportLpOnly;
         copy.timeLimit = this.timeLimit;
         copy.cplexThreads = this.cplexThreads;
         copy.workMemMb = this.workMemMb;
@@ -242,6 +245,7 @@ public class Experiment {
         args.add("seed=" + seed);
         args.add("write=" + write);
         args.add("export_lp=" + exportLp);
+        args.add("export_lp_only=" + exportLpOnly);
         args.add("memory_emphasis=" + memoryEmphasis);
 
         addOptionalArg(args, "timelimit", timeLimit);
